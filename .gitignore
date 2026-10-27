@@ -2,6 +2,6 @@
 __pycache__/
 node_modules/
 frontend/dist/
-data/profiles.json
 .env
 .DS_Store
+frontend/tsconfig.tsbuildinfo

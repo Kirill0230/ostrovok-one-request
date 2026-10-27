@@ -1,0 +1,7 @@
+# Caddy сам получает и продлевает TLS-сертификат Let's Encrypt для DOMAIN
+# и перенаправляет http → https. Нужен DNS-адрес домена, указывающий на сервер, и открытые порты 80/443.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:8000
+	header -Server
+}

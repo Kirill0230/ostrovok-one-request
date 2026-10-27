@@ -8,6 +8,8 @@ interface Props {
   onSend: (text: string) => void;
   onCheckout: () => void;
   onEditParams: () => void;
+  onExportData: () => void;
+  onDeleteData: () => void;
 }
 
 const PRIORITY_LABELS: [keyof Priorities, string][] = [
@@ -22,7 +24,7 @@ const time = (iso: string) => {
   return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-export default function TripPanel({ view, busy, onAction, onSend, onCheckout, onEditParams }: Props) {
+export default function TripPanel({ view, busy, onAction, onSend, onCheckout, onEditParams, onExportData, onDeleteData }: Props) {
   const t = view.trip;
   const booked = t.stage === "booked";
   const budget = t.budget;
@@ -172,6 +174,11 @@ export default function TripPanel({ view, busy, onAction, onSend, onCheckout, on
         </div>
       )}
       <p className="disclaimer">Прототип: отели, рейсы и цены — синтетические данные, климат приблизительный, оплата имитируется. Видео направлений сгенерированы ИИ.</p>
+      <nav className="privacy-links">
+        <a href="/privacy.html" target="_blank" rel="noopener">Политика конфиденциальности</a>
+        <button className="link" onClick={onExportData}>Скачать мои данные</button>
+        <button className="link danger" onClick={onDeleteData}>Удалить мои данные</button>
+      </nav>
     </div>
   );
 }

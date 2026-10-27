@@ -249,3 +249,11 @@ h2, h3, h4 { margin: 0; }
 .booking-card ul { margin: 0; padding-left: 0; list-style: none; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
 .booking-changes ul { padding-left: 16px; list-style: disc; }
 .booking-card .quick { padding: 4px 0 0; flex-wrap: wrap; }
+
+/* ---------- персональные данные */
+.pay-form .consent { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); line-height: 1.4; }
+.pay-form .consent input { width: 18px; height: 18px; flex: none; margin-top: 2px; }
+.pay-form .consent a, .privacy-links a { color: var(--blue); }
+.privacy-links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.privacy-links .link { font-size: 12px; font-weight: 400; }
+.privacy-links .danger { color: var(--err); }

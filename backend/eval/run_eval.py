@@ -6,20 +6,29 @@
 Запуск из папки backend:  .venv/bin/python -m eval.run_eval [--verbose]
 """
 import json
+import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+# прогон пишет во временную схему Postgres и удаляет её в конце — рабочие данные не трогает
+os.environ.setdefault("DB_SCHEMA", f"eval_{uuid.uuid4().hex[:8]}")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "0")  # 30 сценариев подряд упёрлись бы в лимиты
 
-from app.main import app
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import db  # noqa: E402
+from app.main import app  # noqa: E402
 
 QUERIES = json.loads((Path(__file__).parent / "queries.json").read_text(encoding="utf-8"))
 DEFAULT_ANSWER = "море в ноябре вдвоём"
 
 
 def run_one(c: TestClient, q: str) -> dict:
-    sid = c.post("/api/session", json={}).json()["session_id"]
+    auth = c.post("/api/auth/anonymous").json()
+    c.headers["Authorization"] = f"Bearer {auth['token']}"
+    sid = c.post("/api/session").json()["session_id"]
     t0 = time.perf_counter()
     r = c.post("/api/chat", json={"session_id": sid, "message": q}).json()
     clarifications = 0
@@ -40,7 +49,8 @@ def run_one(c: TestClient, q: str) -> dict:
     errors_after = [i["message"] for i in r2["state"]["issues"] if i["severity"] == "error"]
     booked = False
     if r2["state"]["can_checkout"]:
-        r3 = c.post("/api/checkout", json={"session_id": sid}).json()
+        r3 = c.post("/api/checkout", json={"session_id": sid, "consent": True,
+                                            "policy_version": auth["policy_version"]}).json()
         booked = r3["state"]["trip"]["stage"] == "booked"
     budget = r2["state"]["trip"]["budget"]
     return {
@@ -54,8 +64,11 @@ def run_one(c: TestClient, q: str) -> dict:
 
 def main():
     verbose = "--verbose" in sys.argv
-    c = TestClient(app)
-    rows = [run_one(c, q) for q in QUERIES]
+    try:
+        with TestClient(app) as c:
+            rows = [run_one(c, q) for q in QUERIES]
+    finally:
+        db.drop_schema()
     n = len(rows)
     for r in rows:
         mark = "✅" if r["booked"] else "❌"

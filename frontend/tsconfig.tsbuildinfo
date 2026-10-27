@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/chat.tsx","./src/components/checkoutmodal.tsx","./src/components/comparemodal.tsx","./src/components/deck.tsx","./src/components/dislikesheet.tsx","./src/components/paramsmodal.tsx","./src/components/trippanel.tsx"],"version":"5.6.3"}

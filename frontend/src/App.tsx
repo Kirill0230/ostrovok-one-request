@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, userId } from "./api";
+import { ApiError, api } from "./api";
+import { telegramReady } from "./telegram";
 import type { AgentReply, Card, CardKind, ChatMessage, StateView } from "./types";
 import Chat from "./components/Chat";
 import Deck from "./components/Deck";
@@ -41,14 +42,14 @@ export default function App() {
   const start = useCallback(async () => {
     setError(null);
     try {
-      const { session_id, reply } = await api.newSession(userId());
+      const { session_id, reply } = await api.newSession();
       setSessionId(session_id);
       setMessages([]);
       setCards([]);
       applyReply(reply);
       setTab("chat");
     } catch (e) {
-      setError("Не удалось подключиться к серверу. Запущен ли бэкенд на :8765?");
+      setError(e instanceof ApiError ? e.message : "Не удалось подключиться к серверу. Запущен ли бэкенд на :8765?");
     }
   }, [applyReply]);
 
@@ -56,9 +57,7 @@ export default function App() {
   useEffect(() => {
     if (started.current) return; // StrictMode вызывает эффект дважды — не создаём две сессии
     started.current = true;
-    const tg = (window as any).Telegram?.WebApp;
-    tg?.ready?.();
-    tg?.expand?.();
+    telegramReady();
     start();
   }, [start]);
 
@@ -69,12 +68,10 @@ export default function App() {
     try {
       applyReply(await fn(), opts);
     } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes("Сессия не найдена")) {
+      if (e instanceof ApiError && e.status === 404) {
         await start();
-        setError("Сервер перезапускался, и сессия потерялась — начали заново.");
-      }
-      else setError(msg);
+        setError("Сессия истекла — начали заново.");
+      } else setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -103,10 +100,36 @@ export default function App() {
 
   const action = (type: string, payload: Record<string, unknown> = {}) => run(() => api.action(sessionId!, type, payload), { keepDeck: false });
 
-  const checkout = async (name: string, email: string) => {
+  const checkout = async (name: string, email: string, consent: boolean) => {
     setCheckoutOpen(false);
     push({ role: "user", text: "💳 Оплатить (демо)" });
-    await run(() => api.checkout(sessionId!, name, email));
+    await run(() => api.checkout(sessionId!, name, email, consent));
+  };
+
+  const exportData = async () => {
+    try {
+      const data = await api.exportMyData();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "moi-dannye-odin-zapros.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const deleteData = async () => {
+    if (!window.confirm("Удалить все ваши данные: поездки, историю чата и сохранённые предпочтения? "
+      + "Оформленные брони останутся обезличенными. Отменить нельзя.")) return;
+    try {
+      await api.deleteMyData();
+      await start();
+      setError("Ваши данные удалены. Начали с чистого листа.");
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const cartCount = view?.cart.length ?? 0;
@@ -139,7 +162,7 @@ export default function App() {
         </section>
         <section className="pane pane-trip">
           {view && (
-            <TripPanel view={view} busy={busy} onAction={action} onSend={send}
+            <TripPanel view={view} busy={busy} onAction={action} onSend={send} onExportData={exportData} onDeleteData={deleteData}
                        onCheckout={() => setCheckoutOpen(true)} onEditParams={() => setParamsOpen(true)} />
           )}
         </section>

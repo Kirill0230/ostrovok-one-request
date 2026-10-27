@@ -6,7 +6,7 @@ LLM-агент меняют только его, а фронт получает 
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Travellers(BaseModel):
@@ -73,16 +73,22 @@ class Issue(BaseModel):
 
 
 class Booking(BaseModel):
+    """Снимок брони для интерфейса. Контакты сюда не попадают — они только в bookings.contact_enc."""
     id: str
     created_at: str
     total: int
-    contact_name: str = ""
-    contact_email: str = ""
     reminders: List[str] = Field(default_factory=list)
     changes: List[str] = Field(default_factory=list)
 
 
+# Версия схемы TripState в базе. Меняете поля несовместимо (переименование, смена типа) —
+# увеличьте версию и добавьте функцию в app/state_migrations.py.
+STATE_VERSION = 1
+
+
 class TripState(BaseModel):
+    model_config = ConfigDict(extra="ignore")  # удалённые поля из старых сессий не ломают загрузку
+
     origin: str = "moscow"
     date_from: Optional[date] = None
     nights: int = 7
@@ -176,32 +182,38 @@ class AgentReply(BaseModel):
 
 # ---------- запросы API ----------
 
-class NewSessionRequest(BaseModel):
-    user_id: Optional[str] = None
+SessionId = Field(min_length=8, max_length=64, pattern=r"^[a-f0-9]+$")
+
+
+class TelegramAuthRequest(BaseModel):
+    init_data: str = Field(min_length=1, max_length=4096)
 
 
 class ChatRequest(BaseModel):
-    session_id: str
-    message: str
+    session_id: str = SessionId
+    message: str = Field(min_length=1, max_length=1000)
 
 
 class FeedbackRequest(BaseModel):
-    session_id: str
-    card_id: str
+    session_id: str = SessionId
+    card_id: str = Field(max_length=120)
     kind: Literal["destination", "hotel", "flight"]
     action: Literal["like", "dislike"]
-    reason: Optional[str] = None
-    comment: Optional[str] = None
+    reason: Optional[str] = Field(default=None, max_length=40)
+    comment: Optional[str] = Field(default=None, max_length=500)
 
 
 class ActionRequest(BaseModel):
     """Прямые действия из UI без текста: правка параметров, приоритетов, удаление из корзины."""
-    session_id: str
+    session_id: str = SessionId
     type: Literal["set_params", "set_priorities", "remove_item", "add_extra", "reset"]
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: Dict[str, Any] = Field(default_factory=dict, max_length=12)
 
 
 class CheckoutRequest(BaseModel):
-    session_id: str
-    contact_name: str = ""
-    contact_email: str = ""
+    session_id: str = SessionId
+    contact_name: str = Field(default="", max_length=120)
+    contact_email: str = Field(default="", max_length=254, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # согласие на обработку персональных данных (152-ФЗ) — без него бронь не оформляем
+    consent: bool = False
+    policy_version: str = Field(default="", max_length=40)

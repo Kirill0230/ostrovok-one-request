@@ -5,12 +5,13 @@ import type { StateView } from "../types";
 interface Props {
   view: StateView;
   onClose: () => void;
-  onPay: (name: string, email: string) => void;
+  onPay: (name: string, email: string, consent: boolean) => void;
 }
 
 export default function CheckoutModal({ view, onClose, onPay }: Props) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [consent, setConsent] = useState(false);
   const warns = view.issues.filter((i) => i.severity === "warn");
   return (
     <div className="sheet-backdrop" onClick={onClose}>
@@ -27,11 +28,16 @@ export default function CheckoutModal({ view, onClose, onPay }: Props) {
         </ul>
         <div className="total-row"><span>К оплате</span><b>{rub(view.total)}</b></div>
         {warns.length > 0 && <p className="warn-note">⚠️ {warns.map((w) => w.message).join("; ")}</p>}
-        <form className="pay-form" onSubmit={(e) => { e.preventDefault(); onPay(name, email); }}>
+        <form className="pay-form" onSubmit={(e) => { e.preventDefault(); if (consent) onPay(name, email, consent); }}>
           <label>Имя контактного лица<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Иван Иванов" /></label>
           <label>Email для подтверждения<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ivan@example.com" /></label>
+          <label className="consent">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            <span>Даю согласие на обработку персональных данных (состав поездки, контакты) для оформления брони
+              согласно <a href="/privacy.html" target="_blank" rel="noopener">политике конфиденциальности</a>.</span>
+          </label>
           <p className="muted small">Это демо: оплата имитируется, деньги не списываются, данные карты не нужны.</p>
-          <button type="submit" className="primary wide">💳 Оплатить {rub(view.total)} (демо)</button>
+          <button type="submit" className="primary wide" disabled={!consent}>💳 Оплатить {rub(view.total)} (демо)</button>
         </form>
       </div>
     </div>

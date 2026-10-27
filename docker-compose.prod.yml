@@ -1,0 +1,48 @@
+# Продакшн: docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+# Наружу открыт только Caddy (80/443, TLS). Приложение и база доступны лишь внутри сети compose.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: odin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      POSTGRES_DB: odin
+    volumes:
+      - odin_pg_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odin -d odin"]
+      interval: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://odin:${POSTGRES_PASSWORD}@db:5432/odin
+      TRUST_PROXY: "1"
+      FORCE_HTTPS: "1"
+    volumes:
+      - ./data/videos:/srv/data/videos:ro
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  odin_pg_prod:
+  caddy_data:

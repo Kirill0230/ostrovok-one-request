@@ -44,7 +44,7 @@ export interface Trip {
   transfer_id: string | null;
   assumptions: Record<string, string>;
   stage: "start" | "destination" | "hotel" | "flight" | "review" | "booked";
-  booking: null | { id: string; created_at: string; total: number; reminders: string[]; changes: string[]; contact_name: string };
+  booking: null | { id: string; created_at: string; total: number; reminders: string[]; changes: string[] };
 }
 
 export interface StateView {
