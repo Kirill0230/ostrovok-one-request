@@ -1,13 +1,16 @@
-"""Хранилище на Postgres: сессии, история чата, профили, брони, согласия.
+"""Хранилище на Postgres: сессии, история чата, профили, брони, согласия, аналитика.
 
 Главные правила:
-  • Любой запрос к сессии идёт через session_scope(session_id, user_id). Строка сессии блокируется
-    (SELECT … FOR UPDATE) до конца запроса, и всё изменённое сохраняется одной транзакцией.
+  • Оптимистичная блокировка. Сессия читается короткой транзакцией, агент (и LLM) работает БЕЗ открытого
+    соединения, затем всё сохраняется одной транзакцией с проверкой версии строки. Если сессию за это
+    время изменил параллельный запрос — save_session бросает SessionConflict, и запрос повторяется на
+    свежем состоянии (main._handle).
   • Сессию видит только её владелец: чужой session_id ведёт себя как несуществующий.
   • Персональные данные лежат только в зашифрованных колонках *_enc (security/crypto.py).
+  • Аналитика — отдельная обезличенная таблица analytics_events (analytics.py).
 
 Агент в базу напрямую не пишет: он кладёт намерения в сессию (pending_*, profile_dirty),
-а store сохраняет их при выходе из session_scope.
+а store сохраняет их при save_session.
 """
 import logging
 import os
@@ -15,9 +18,8 @@ import secrets
 import string
 import time
 import uuid
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, List, Optional
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -30,7 +32,8 @@ from .state_migrations import StateTooNew, upgrade
 log = logging.getLogger(__name__)
 
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
-LOCK_TIMEOUT = os.getenv("SESSION_LOCK_TIMEOUT", "15s")
+MAINTENANCE_EVERY_S = int(os.getenv("MAINTENANCE_EVERY_S", "3600"))
+MAINTENANCE_LOCK = 7212002
 
 
 @dataclass
@@ -61,25 +64,41 @@ class Consent:
 
 
 @dataclass
+class AnalyticsEvent:
+    event: str
+    stage: Optional[str] = None
+    props: Dict = field(default_factory=dict)
+
+
+@dataclass
 class Session:
     id: str
     user_id: str
     state: TripState = field(default_factory=TripState)
     deck: List[Card] = field(default_factory=list)
     metrics: Metrics = field(default_factory=Metrics)
-    # что сохранить при выходе из session_scope
+    version: Optional[int] = None  # None — новая, ещё не сохранённая сессия
+    # что сохранить при save_session
     pending_messages: List[Dict[str, str]] = field(default_factory=list)
     pending_booking_events: List[BookingEvent] = field(default_factory=list)
     pending_contact: Optional[Dict[str, str]] = None  # контакты для брони — только в bookings, не в состоянии
     pending_consents: List[Consent] = field(default_factory=list)
+    pending_events: List[AnalyticsEvent] = field(default_factory=list)
     profile_dirty: bool = False
 
     def log(self, role: str, text: str) -> None:
         self.pending_messages.append({"role": role, "text": text})
 
+    def track(self, event: str, **props) -> None:
+        self.pending_events.append(AnalyticsEvent(event=event, stage=self.state.stage, props=props))
+
 
 class SessionNotFound(Exception):
     pass
+
+
+class SessionConflict(Exception):
+    """Сессию изменил параллельный запрос, пока работал агент."""
 
 
 def _metrics(raw: dict) -> Metrics:
@@ -88,23 +107,19 @@ def _metrics(raw: dict) -> Metrics:
 
 # ---------------------------------------------------------------- сессии
 
-@contextmanager
-def session_scope(user_id: str, session_id: Optional[str] = None) -> Iterator[Session]:
-    """Открыть сессию пользователя под блокировкой (или создать новую) и сохранить при выходе."""
-    with db.tx() as conn:
-        conn.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
-        if session_id is None:
-            sess = Session(id=uuid.uuid4().hex, user_id=user_id)
-            _insert_session(conn, sess)
-        else:
-            row = conn.execute(
-                "SELECT * FROM sessions WHERE id = %s AND user_id = %s AND expires_at > now() FOR UPDATE",
-                (session_id, user_id)).fetchone()
-            if not row:
-                raise SessionNotFound(session_id)
-            sess = _from_row(row)
-        yield sess
-        _save(conn, sess)
+def new_session(user_id: str) -> Session:
+    """Новая сессия в памяти; в базу попадёт при save_session."""
+    return Session(id=uuid.uuid4().hex, user_id=user_id)
+
+
+async def load_session(user_id: str, session_id: str) -> Session:
+    async with db.tx() as conn:
+        row = await (await conn.execute(
+            "SELECT * FROM sessions WHERE id = %s AND user_id = %s AND expires_at > now()",
+            (session_id, user_id))).fetchone()
+    if not row:
+        raise SessionNotFound(session_id)
+    return _from_row(row)
 
 
 def _from_row(row: dict) -> Session:
@@ -121,58 +136,77 @@ def _from_row(row: dict) -> Session:
         deck = [Card.model_validate(c) for c in row["deck"]]
     except Exception:
         deck = []  # колода — временные данные, при несовместимости просто пересоберётся
-    return Session(id=row["id"], user_id=row["user_id"], state=state, deck=deck, metrics=_metrics(row["metrics"]))
+    return Session(id=row["id"], user_id=row["user_id"], state=state, deck=deck, metrics=_metrics(row["metrics"]),
+                   version=row["version"])
 
 
-def _insert_session(conn: psycopg.Connection, sess: Session) -> None:
-    conn.execute(
-        """INSERT INTO sessions (id, user_id, state_enc, state_version, deck, metrics, expires_at)
-           VALUES (%s, %s, %s, %s, '[]', %s, now() + make_interval(days => %s))""",
-        (sess.id, sess.user_id, encrypt_json(sess.state.model_dump(mode="json")), STATE_VERSION,
-         Jsonb(asdict(sess.metrics)), SESSION_TTL_DAYS))
-
-
-def _save(conn: psycopg.Connection, sess: Session) -> None:
-    if sess.pending_booking_events:
-        _save_booking(conn, sess)  # первым: при коллизии номера брони он меняется в состоянии
-    conn.execute(
-        """UPDATE sessions SET state = NULL, state_enc = %s, state_version = %s, deck = %s, metrics = %s,
-                  updated_at = now(), expires_at = now() + make_interval(days => %s)
-           WHERE id = %s""",
-        (encrypt_json(sess.state.model_dump(mode="json")), STATE_VERSION,
-         Jsonb([c.model_dump(mode="json") for c in sess.deck]), Jsonb(asdict(sess.metrics)),
-         SESSION_TTL_DAYS, sess.id))
-    if sess.pending_messages:
-        with conn.cursor() as cur:
-            cur.executemany("INSERT INTO messages (session_id, role, text_enc) VALUES (%s, %s, %s)",
-                            [(sess.id, m["role"], encrypt_str(m["text"])) for m in sess.pending_messages])
-        sess.pending_messages = []
-    if sess.profile_dirty:
-        _save_profile(conn, sess.user_id, sess.state)
-        sess.profile_dirty = False
-    for c in sess.pending_consents:
-        conn.execute("""INSERT INTO consents (user_id, purpose, policy_version, granted, ip_hash)
-                        VALUES (%s, %s, %s, %s, %s)""", (sess.user_id, c.purpose, c.policy_version, c.granted, c.ip_hash))
-    sess.pending_consents = []
+async def save_session(sess: Session) -> None:
+    """Сохранить всё, что изменил агент, одной транзакцией. SessionConflict — если версия устарела."""
+    state_enc = encrypt_json(sess.state.model_dump(mode="json"))
+    deck = Jsonb([c.model_dump(mode="json") for c in sess.deck])
+    metrics = Jsonb(asdict(sess.metrics))
+    async with db.tx() as conn:
+        if sess.version is None:
+            await conn.execute(
+                """INSERT INTO sessions (id, user_id, state_enc, state_version, deck, metrics, version, expires_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, 1, now() + make_interval(days => %s))""",
+                (sess.id, sess.user_id, state_enc, STATE_VERSION, deck, metrics, SESSION_TTL_DAYS))
+            new_version = 1
+        else:
+            row = await (await conn.execute(
+                """UPDATE sessions SET state = NULL, state_enc = %s, state_version = %s, deck = %s, metrics = %s,
+                          version = version + 1, updated_at = now(), expires_at = now() + make_interval(days => %s)
+                   WHERE id = %s AND user_id = %s AND version = %s
+                   RETURNING version""",
+                (state_enc, STATE_VERSION, deck, metrics, SESSION_TTL_DAYS, sess.id, sess.user_id,
+                 sess.version))).fetchone()
+            if not row:
+                raise SessionConflict(sess.id)  # rollback: ничего из этого запроса не сохранится
+            new_version = row["version"]
+        if sess.pending_booking_events:
+            await _save_booking(conn, sess)
+            # номер брони мог смениться при коллизии — перезаписываем состояние с актуальным номером
+            await conn.execute("UPDATE sessions SET state_enc = %s WHERE id = %s",
+                               (encrypt_json(sess.state.model_dump(mode="json")), sess.id))
+        if sess.pending_messages:
+            async with conn.cursor() as cur:
+                await cur.executemany("INSERT INTO messages (session_id, role, text_enc) VALUES (%s, %s, %s)",
+                                      [(sess.id, m["role"], encrypt_str(m["text"])) for m in sess.pending_messages])
+        if sess.profile_dirty:
+            await _save_profile(conn, sess.user_id, sess.state)
+        for c in sess.pending_consents:
+            await conn.execute("""INSERT INTO consents (user_id, purpose, policy_version, granted, ip_hash)
+                                  VALUES (%s, %s, %s, %s, %s)""",
+                               (sess.user_id, c.purpose, c.policy_version, c.granted, c.ip_hash))
+        if sess.pending_events:
+            ref = pseudonymize("session:" + sess.id)
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO analytics_events (session_ref, event, stage, props) VALUES (%s, %s, %s, %s)",
+                    [(ref, e.event, e.stage, Jsonb(e.props)) for e in sess.pending_events])
+    sess.version = new_version
+    sess.pending_messages, sess.pending_booking_events, sess.pending_consents, sess.pending_events = [], [], [], []
+    sess.pending_contact, sess.profile_dirty = None, False
 
 
 def _text(row: dict) -> str:
     return decrypt_str(row["text_enc"]) if row["text_enc"] else (row["text"] or "")
 
 
-def recent_messages(session_id: str, user_id: str, limit: int = 50) -> List[dict]:
-    with db.tx() as conn:
-        rows = conn.execute(
+async def recent_messages(session_id: str, user_id: str, limit: int = 50) -> List[dict]:
+    async with db.tx() as conn:
+        rows = await (await conn.execute(
             """SELECT m.role, m.text, m.text_enc, extract(epoch FROM m.created_at) AS at
                FROM messages m JOIN sessions s ON s.id = m.session_id
                WHERE m.session_id = %s AND s.user_id = %s ORDER BY m.id DESC LIMIT %s""",
-            (session_id, user_id, limit)).fetchall()
+            (session_id, user_id, limit))).fetchall()
     return [{"role": r["role"], "text": _text(r), "at": float(r["at"])} for r in reversed(rows)]
 
 
-def all_metrics() -> List[Metrics]:
-    with db.tx() as conn:
-        rows = conn.execute("SELECT metrics FROM sessions WHERE (metrics->>'turns')::int > 0").fetchall()
+async def all_metrics() -> List[Metrics]:
+    async with db.tx() as conn:
+        rows = await (await conn.execute(
+            "SELECT metrics FROM sessions WHERE (metrics->>'turns')::int > 0")).fetchall()
     return [_metrics(r["metrics"]) for r in rows]
 
 
@@ -182,7 +216,7 @@ def new_booking_id() -> str:
     return "OST-" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
 
-def _save_booking(conn: psycopg.Connection, sess: Session) -> None:
+async def _save_booking(conn: psycopg.AsyncConnection, sess: Session) -> None:
     s = sess.state
     b = s.booking
     from .validator import build_view, current_hotel  # локально: validator тянет tools и каталог
@@ -193,8 +227,8 @@ def _save_booking(conn: psycopg.Connection, sess: Session) -> None:
             contact = encrypt_json(sess.pending_contact) if sess.pending_contact else None
             for _ in range(5):  # номер брони случайный: при совпадении с чужой бронью берём новый
                 try:
-                    with conn.transaction():  # savepoint — ошибка вставки не рушит всю транзакцию
-                        conn.execute(
+                    async with conn.transaction():  # savepoint — ошибка вставки не рушит всю транзакцию
+                        await conn.execute(
                             """INSERT INTO bookings (id, session_id, user_id, status, destination_id, check_in, check_out,
                                                      total, contact_enc, details)
                                VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, %s)""",
@@ -205,38 +239,36 @@ def _save_booking(conn: psycopg.Connection, sess: Session) -> None:
                     b.id = new_booking_id()
             else:
                 raise RuntimeError("Не удалось подобрать уникальный номер брони")
-            sess.pending_contact = None
         else:
-            conn.execute(
+            await conn.execute(
                 """UPDATE bookings SET status = %s, total = %s, check_in = %s, check_out = %s, details = %s,
                           updated_at = now() WHERE id = %s""",
                 ("cancelled" if ev.type == "cancelled" else "changed", b.total,
                  h["check_in_date"] if h else None, h["check_out_date"] if h else None, Jsonb(details), b.id))
-        conn.execute(
+        await conn.execute(
             """INSERT INTO booking_events (booking_id, type, amount_delta, total_after, description)
                VALUES (%s, %s, %s, %s, %s)""", (b.id, ev.type, ev.amount_delta, b.total, ev.description))
-    sess.pending_booking_events = []
 
 
 BOOKING_PUBLIC_FIELDS = "id, status, destination_id, check_in, check_out, total, details, created_at, updated_at"
 
 
-def booking_history(booking_id: str, user_id: str) -> Optional[dict]:
+async def booking_history(booking_id: str, user_id: str) -> Optional[dict]:
     """Бронь владельца с историей изменений (без контактов)."""
-    with db.tx() as conn:
-        b = conn.execute(f"SELECT {BOOKING_PUBLIC_FIELDS} FROM bookings WHERE id = %s AND user_id = %s",
-                         (booking_id, user_id)).fetchone()
+    async with db.tx() as conn:
+        b = await (await conn.execute(f"SELECT {BOOKING_PUBLIC_FIELDS} FROM bookings WHERE id = %s AND user_id = %s",
+                                      (booking_id, user_id))).fetchone()
         if not b:
             return None
-        events = conn.execute(
+        events = await (await conn.execute(
             """SELECT type, amount_delta, total_after, description, created_at FROM booking_events
-               WHERE booking_id = %s ORDER BY id""", (booking_id,)).fetchall()
+               WHERE booking_id = %s ORDER BY id""", (booking_id,))).fetchall()
     return {**b, "events": events}
 
 
-def bookings_stats() -> Dict[str, int]:
-    with db.tx() as conn:
-        rows = conn.execute("SELECT status, count(*) AS n FROM bookings GROUP BY status").fetchall()
+async def bookings_stats() -> Dict[str, int]:
+    async with db.tx() as conn:
+        rows = await (await conn.execute("SELECT status, count(*) AS n FROM bookings GROUP BY status")).fetchall()
     return {r["status"]: r["n"] for r in rows}
 
 
@@ -248,16 +280,18 @@ def _profile(row: Optional[dict]) -> Optional[dict]:
     return decrypt_json(row["profile_enc"]) if row["profile_enc"] else row["profile"]
 
 
-def load_profile(user_id: Optional[str]) -> Optional[dict]:
+async def load_profile(user_id: Optional[str]) -> Optional[dict]:
     if not user_id:
         return None
-    with db.tx() as conn:
-        row = conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s", (user_id,)).fetchone()
+    async with db.tx() as conn:
+        row = await (await conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s",
+                                        (user_id,))).fetchone()
     return _profile(row)
 
 
-def _save_profile(conn: psycopg.Connection, user_id: str, state: TripState) -> None:
-    row = conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s FOR UPDATE", (user_id,)).fetchone()
+async def _save_profile(conn: psycopg.AsyncConnection, user_id: str, state: TripState) -> None:
+    row = await (await conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s FOR UPDATE",
+                                    (user_id,))).fetchone()
     trips = (_profile(row) or {}).get("trips", [])
     if state.booking and state.destination_id and state.booking.id not in [t.get("booking") for t in trips]:
         trips.append({"booking": state.booking.id, "destination": state.destination_id})
@@ -268,7 +302,7 @@ def _save_profile(conn: psycopg.Connection, user_id: str, state: TripState) -> N
         "trip_types": state.prefs.trip_types,
         "trips": trips[-10:],
     }
-    conn.execute(
+    await conn.execute(
         """INSERT INTO profiles (user_id, profile, profile_enc) VALUES (%s, NULL, %s)
            ON CONFLICT (user_id) DO UPDATE SET profile = NULL, profile_enc = excluded.profile_enc, updated_at = now()""",
         (user_id, encrypt_json(profile)))
@@ -276,87 +310,149 @@ def _save_profile(conn: psycopg.Connection, user_id: str, state: TripState) -> N
 
 # ---------------------------------------------------------------- персональные данные (152-ФЗ)
 
-def export_user_data(user_id: str) -> dict:
+async def export_user_data(user_id: str) -> dict:
     """Всё, что мы храним о пользователе, в расшифрованном виде — для права на доступ к своим данным."""
-    with db.tx() as conn:
-        profile = _profile(conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s",
-                                        (user_id,)).fetchone())
+    async with db.tx() as conn:
+        profile = _profile(await (await conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s",
+                                                     (user_id,))).fetchone())
         sessions = []
-        for r in conn.execute("SELECT * FROM sessions WHERE user_id = %s ORDER BY created_at", (user_id,)).fetchall():
-            msgs = conn.execute("SELECT role, text, text_enc, created_at FROM messages WHERE session_id = %s ORDER BY id",
-                                (r["id"],)).fetchall()
+        for r in await (await conn.execute("SELECT * FROM sessions WHERE user_id = %s ORDER BY created_at",
+                                           (user_id,))).fetchall():
+            msgs = await (await conn.execute(
+                "SELECT role, text, text_enc, created_at FROM messages WHERE session_id = %s ORDER BY id",
+                (r["id"],))).fetchall()
             sessions.append({
                 "id": r["id"], "created_at": r["created_at"], "expires_at": r["expires_at"],
                 "trip": decrypt_json(r["state_enc"]) if r["state_enc"] else r["state"],
                 "messages": [{"role": m["role"], "text": _text(m), "at": m["created_at"]} for m in msgs],
             })
         bookings = []
-        for b in conn.execute(f"SELECT {BOOKING_PUBLIC_FIELDS}, contact_enc FROM bookings WHERE user_id = %s",
-                              (user_id,)).fetchall():
+        for b in await (await conn.execute(f"SELECT {BOOKING_PUBLIC_FIELDS}, contact_enc FROM bookings WHERE user_id = %s",
+                                           (user_id,))).fetchall():
             contact = decrypt_json(b.pop("contact_enc"))
             bookings.append({**b, "contact": contact})
-        consents = conn.execute("SELECT purpose, policy_version, granted, created_at FROM consents WHERE user_id = %s "
-                                "ORDER BY id", (user_id,)).fetchall()
-        conn.execute("INSERT INTO privacy_log (user_hash, action) VALUES (%s, 'export')", (pseudonymize(user_id),))
+        consents = await (await conn.execute(
+            "SELECT purpose, policy_version, granted, created_at FROM consents WHERE user_id = %s ORDER BY id",
+            (user_id,))).fetchall()
+        await conn.execute("INSERT INTO privacy_log (user_hash, action) VALUES (%s, 'export')", (pseudonymize(user_id),))
     return {"user_id": user_id, "profile": profile, "sessions": sessions, "bookings": bookings, "consents": consents}
 
 
-def erase_user_data(user_id: str) -> dict:
+async def erase_user_data(user_id: str) -> dict:
     """Удаление по запросу: сессии, история, профиль — удаляются; в бронях стираются контакты и привязка
-    к пользователю (сама бронь остаётся как запись о сделке); согласия обезличиваются."""
+    к пользователю (сама бронь остаётся как запись о сделке); согласия обезличиваются.
+    Счётчики лимитов в Redis истекают сами в течение суток; аналитика и так обезличена."""
     uh = pseudonymize(user_id)
-    with db.tx() as conn:
-        n_sessions = conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,)).rowcount
-        conn.execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
-        n_bookings = conn.execute(
+    async with db.tx() as conn:
+        n_sessions = (await conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))).rowcount
+        await conn.execute("DELETE FROM profiles WHERE user_id = %s", (user_id,))
+        n_bookings = (await conn.execute(
             """UPDATE bookings SET contact_enc = NULL, contact_name = NULL, contact_email = NULL,
                       user_id = NULL, session_id = NULL, pii_erased_at = now() WHERE user_id = %s""",
-            (user_id,)).rowcount
-        conn.execute("UPDATE consents SET user_id = %s WHERE user_id = %s", ("erased:" + uh, user_id))
-        conn.execute("DELETE FROM rate_limits WHERE key LIKE %s", (f"%:{user_id}",))
+            (user_id,))).rowcount
+        await conn.execute("UPDATE consents SET user_id = %s WHERE user_id = %s", ("erased:" + uh, user_id))
         details = {"sessions": n_sessions, "bookings_anonymized": n_bookings}
-        conn.execute("INSERT INTO privacy_log (user_hash, action, details) VALUES (%s, 'erase', %s)", (uh, Jsonb(details)))
+        await conn.execute("INSERT INTO privacy_log (user_hash, action, details) VALUES (%s, 'erase', %s)",
+                           (uh, Jsonb(details)))
     return details
 
 
 # ---------------------------------------------------------------- обслуживание
 
-def purge_expired() -> dict:
-    """Фоновая очистка: истёкшие сессии, старые счётчики лимитов, контакты в бронях после срока хранения."""
-    with db.tx() as conn:
-        sessions = conn.execute("DELETE FROM sessions WHERE expires_at < now()").rowcount
-        conn.execute("DELETE FROM rate_limits WHERE window_start < now() - interval '2 days'")
-        retained = conn.execute(
+async def run_maintenance(force: bool = False) -> Optional[dict]:
+    """Очистка истёкших сессий и контактов в бронях после срока хранения + шифрование старых строк.
+
+    Каждый экземпляр сервиса периодически вызывает эту функцию, но выполняет её только один:
+    advisory-блокировка не даёт запускать параллельно, а maintenance_runs — чаще MAINTENANCE_EVERY_S.
+    Возвращает результат или None, если в этот раз работу сделал (или делает) кто-то другой.
+    """
+    async with db.tx() as conn:
+        got = await (await conn.execute("SELECT pg_try_advisory_xact_lock(%s) AS ok", (MAINTENANCE_LOCK,))).fetchone()
+        if not got["ok"]:
+            return None
+        last = await (await conn.execute(
+            "SELECT last_run_at > now() - make_interval(secs => %s) AS fresh FROM maintenance_runs WHERE job = 'purge'",
+            (MAINTENANCE_EVERY_S,))).fetchone()
+        if last and last["fresh"] and not force:
+            return None
+        result = {"encrypted_legacy": await _encrypt_legacy_rows(conn)}
+        result["sessions"] = (await conn.execute("DELETE FROM sessions WHERE expires_at < now()")).rowcount
+        result["booking_contacts"] = (await conn.execute(
             """UPDATE bookings SET contact_enc = NULL, contact_name = NULL, contact_email = NULL, pii_erased_at = now()
                WHERE pii_erased_at IS NULL AND check_out < current_date - make_interval(days => %s)""",
-            (config.BOOKING_PII_RETENTION_DAYS,)).rowcount
-        if retained:
-            conn.execute("INSERT INTO privacy_log (user_hash, action, details) VALUES ('-', 'retention', %s)",
-                         (Jsonb({"bookings": retained}),))
-    if sessions or retained:
-        log.info("Очистка: сессий %s, контактов в бронях %s", sessions, retained)
-    return {"sessions": sessions, "booking_contacts": retained}
+            (config.BOOKING_PII_RETENTION_DAYS,))).rowcount
+        if result["booking_contacts"]:
+            await conn.execute("INSERT INTO privacy_log (user_hash, action, details) VALUES ('-', 'retention', %s)",
+                               (Jsonb({"bookings": result["booking_contacts"]}),))
+        await conn.execute(
+            """INSERT INTO maintenance_runs (job, last_run_at, last_result) VALUES ('purge', now(), %s)
+               ON CONFLICT (job) DO UPDATE SET last_run_at = now(), last_result = excluded.last_result""",
+            (Jsonb(result),))
+    if any(result.values()):
+        log.info("Обслуживание: %s", result)
+    return result
 
 
-def encrypt_legacy_rows() -> int:
-    """Зашифровать строки, сохранённые до появления шифрования (идемпотентно, запускается при старте)."""
+async def _encrypt_legacy_rows(conn: psycopg.AsyncConnection) -> int:
+    """Зашифровать строки, сохранённые до появления шифрования (идемпотентно)."""
     n = 0
-    with db.tx() as conn:
-        for r in conn.execute("SELECT id, state FROM sessions WHERE state IS NOT NULL").fetchall():
-            conn.execute("UPDATE sessions SET state_enc = %s, state = NULL WHERE id = %s", (encrypt_json(r["state"]), r["id"]))
-            n += 1
-        for r in conn.execute("SELECT id, text FROM messages WHERE text IS NOT NULL").fetchall():
-            conn.execute("UPDATE messages SET text_enc = %s, text = NULL WHERE id = %s", (encrypt_str(r["text"]), r["id"]))
-            n += 1
-        for r in conn.execute("SELECT user_id, profile FROM profiles WHERE profile IS NOT NULL").fetchall():
-            conn.execute("UPDATE profiles SET profile_enc = %s, profile = NULL WHERE user_id = %s",
-                         (encrypt_json(r["profile"]), r["user_id"]))
-            n += 1
-        for r in conn.execute("""SELECT id, contact_name, contact_email FROM bookings
-                                 WHERE contact_name IS NOT NULL OR contact_email IS NOT NULL""").fetchall():
-            conn.execute("UPDATE bookings SET contact_enc = %s, contact_name = NULL, contact_email = NULL WHERE id = %s",
-                         (encrypt_json({"name": r["contact_name"], "email": r["contact_email"]}), r["id"]))
-            n += 1
-    if n:
-        log.info("Зашифровано старых строк с персональными данными: %s", n)
+    for r in await (await conn.execute("SELECT id, state FROM sessions WHERE state IS NOT NULL")).fetchall():
+        await conn.execute("UPDATE sessions SET state_enc = %s, state = NULL WHERE id = %s",
+                           (encrypt_json(r["state"]), r["id"]))
+        n += 1
+    for r in await (await conn.execute("SELECT id, text FROM messages WHERE text IS NOT NULL")).fetchall():
+        await conn.execute("UPDATE messages SET text_enc = %s, text = NULL WHERE id = %s", (encrypt_str(r["text"]), r["id"]))
+        n += 1
+    for r in await (await conn.execute("SELECT user_id, profile FROM profiles WHERE profile IS NOT NULL")).fetchall():
+        await conn.execute("UPDATE profiles SET profile_enc = %s, profile = NULL WHERE user_id = %s",
+                           (encrypt_json(r["profile"]), r["user_id"]))
+        n += 1
+    for r in await (await conn.execute("""SELECT id, contact_name, contact_email FROM bookings
+                                          WHERE contact_name IS NOT NULL OR contact_email IS NOT NULL""")).fetchall():
+        await conn.execute("UPDATE bookings SET contact_enc = %s, contact_name = NULL, contact_email = NULL WHERE id = %s",
+                           (encrypt_json({"name": r["contact_name"], "email": r["contact_email"]}), r["id"]))
+        n += 1
     return n
+
+
+# ---------------------------------------------------------------- аналитика
+
+async def funnel(days: int = 30) -> dict:
+    """Воронка и основные срезы по обезличенным событиям за последние days дней."""
+    async with db.tx() as conn:
+        def q(sql, *args):
+            return conn.execute(sql, args)
+        steps = await (await q(
+            """SELECT
+                 count(DISTINCT session_ref) FILTER (WHERE event = 'session_started')                       AS started,
+                 count(DISTINCT session_ref) FILTER (WHERE event = 'recommendations_shown')                 AS saw_options,
+                 count(DISTINCT session_ref) FILTER (WHERE event = 'feedback' AND props->>'action' = 'like'
+                                                     AND props->>'kind' = 'destination')                    AS chose_destination,
+                 count(DISTINCT session_ref) FILTER (WHERE event = 'feedback' AND props->>'action' = 'like'
+                                                     AND props->>'kind' = 'hotel')                          AS chose_hotel,
+                 count(DISTINCT session_ref) FILTER (WHERE event = 'cart_ready')                            AS reached_cart,
+                 count(DISTINCT session_ref) FILTER (WHERE event = 'booked')                                AS booked
+               FROM analytics_events WHERE at > now() - make_interval(days => %s)""", days)).fetchone()
+        dislikes = await (await q(
+            """SELECT props->>'kind' AS kind, coalesce(props->>'reason', 'без причины') AS reason, count(*) AS n
+               FROM analytics_events WHERE event = 'feedback' AND props->>'action' = 'dislike'
+                 AND at > now() - make_interval(days => %s)
+               GROUP BY 1, 2 ORDER BY n DESC LIMIT 20""", days)).fetchall()
+        destinations = await (await q(
+            """SELECT props->>'destination' AS destination,
+                      count(*) FILTER (WHERE event = 'feedback' AND props->>'action' = 'like') AS liked,
+                      count(*) FILTER (WHERE event = 'feedback' AND props->>'action' = 'dislike') AS disliked,
+                      count(*) FILTER (WHERE event = 'booked') AS booked
+               FROM analytics_events WHERE props ? 'destination' AND at > now() - make_interval(days => %s)
+               GROUP BY 1 ORDER BY booked DESC, liked DESC""", days)).fetchall()
+        replans = await (await q(
+            """SELECT count(*) AS n FROM analytics_events
+               WHERE event = 'plan_changed' AND at > now() - make_interval(days => %s)""", days)).fetchone()
+    started = steps["started"] or 1
+    return {
+        "days": days,
+        "funnel": {k: {"sessions": v, "share": round(v / started, 3)} for k, v in steps.items()},
+        "dislike_reasons": dislikes,
+        "destinations": destinations,
+        "plan_changes": replans["n"],
+    }

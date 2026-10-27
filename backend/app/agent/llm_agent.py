@@ -22,10 +22,11 @@ from .rule_agent import RuleAgent
 class LLMAgent(RuleAgent):
     name = "llm"
 
-    def understand(self, text: str, s: TripState) -> nlu.ParseResult:
-        # TODO(LLM): вызвать GigaChat, распарсить JSON в nlu.ParseResult; при ошибке — правила.
-        return super().understand(text, s)
+    async def understand(self, text: str, s: TripState) -> nlu.ParseResult:
+        # TODO(LLM): вызвать GigaChat асинхронно (например, llm.ainvoke), распарсить JSON в nlu.ParseResult;
+        # при ошибке или таймауте — правила. Синхронный клиент не вызывайте: он заблокирует сервер.
+        return await super().understand(text, s)
 
-    def phrase(self, draft: str, s: TripState) -> str:
+    async def phrase(self, draft: str, s: TripState) -> str:
         # TODO(LLM): переписать draft живым языком без изменения фактов.
         return draft

@@ -13,6 +13,25 @@ _raw = json.loads((DATA_DIR / "cities.json").read_text(encoding="utf-8"))
 CITIES: Dict[str, dict] = {c["id"]: c for c in _raw["cities"]}
 ORIGINS: Dict[str, dict] = _raw["origins"]
 
+
+def _load_climate() -> dict:
+    """Климатические нормы Open-Meteo (data/climate.json, backend/scripts/fetch_climate.py).
+    Если файла или города в нём нет — остаются запасные примерные значения из cities.json."""
+    path = Path(os.getenv("CLIMATE_PATH", DATA_DIR / "climate.json"))
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for cid, row in data.get("cities", {}).items():
+        c = CITIES.get(cid)
+        if c and len(row.get("air") or []) == 12 and len(row.get("rain") or []) == 12:
+            sea = row.get("sea") or [None] * 12
+            c["climate"] = {"air": row["air"], "sea": sea, "rain": row["rain"]}
+            c["climate_source"] = "open-meteo"
+    return {k: v for k, v in data.items() if k != "cities"}
+
+
+CLIMATE_META = _load_climate()
+
 TYPE_LABELS = {
     "beach": "пляж", "city": "город", "food": "еда", "party": "тусовки",
     "relax": "спокойный отдых", "nature": "природа", "shopping": "шопинг",

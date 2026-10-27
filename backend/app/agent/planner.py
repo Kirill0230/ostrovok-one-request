@@ -6,7 +6,7 @@
 """
 import time
 from datetime import timedelta
-from typing import Callable, List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional
 
 from ..catalog import CITIES, ORIGINS, plural, range_label, rub
 from ..models import AgentReply, Card, TripState
@@ -135,7 +135,7 @@ def _ensure_dates(s: TripState):
         s.destination_id = s.prefs.candidates[0]
 
 
-def next_step(sess: Session, ctx: Ctx, phrase: Callable[[str, TripState], str], auto_transfer: bool = True) -> AgentReply:
+def next_step(sess: Session, ctx: Ctx, auto_transfer: bool = True) -> AgentReply:
     s = sess.state
     _ensure_dates(s)
     show = next(fn for cond, fn in STAGES if cond(s))
@@ -156,7 +156,7 @@ def next_step(sess: Session, ctx: Ctx, phrase: Callable[[str, TripState], str], 
         s.asked.append("assumptions")
     parts.append(res.main)
     quick = ctx.quick or (DEFAULT_QUICK.get(res.kind, []) if res.kind else [])
-    return AgentReply(text=phrase("\n\n".join(p for p in parts if p), s), cards=res.cards, deck_kind=res.kind,
+    return AgentReply(text="\n\n".join(p for p in parts if p), cards=res.cards, deck_kind=res.kind,
                       quick_replies=list(dict.fromkeys(quick))[:5], steps=ctx.steps, changes=ctx.changes,
                       ui_action=res.ui_action, state=build_view(s))
 

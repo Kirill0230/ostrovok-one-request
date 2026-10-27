@@ -5,12 +5,17 @@
   2. apply_parse    — изменить TripState (trip_ops.py);
   3. apply_intents  — выполнить команды: «бюджет меньше», «другой отель»… (intents.py);
   4. replan         — пересчитать зависимое, не трогая остальное (replan.py);
-  5. next_step      — показать следующий этап: направления → отели → перелёты → корзина (planner.py).
+  5. next_step      — показать следующий этап: направления → отели → перелёты → корзина (planner.py);
+  6. phrase()       — финальная формулировка ответа (LLM — через хук).
 
 Лайк/дизлайк — feedback.py, оплата и изменения после неё — booking.py.
-Хуки для LLM-команды: understand() и phrase() — см. llm_agent.py.
+
+Публичные методы асинхронные: сетевые вызовы (LLM, база) — только в них и в хуках understand()/phrase(),
+пока они ждут ответа, сервер обслуживает других. Логика правил — обычный быстрый код без ввода-вывода.
+Хуки для LLM-команды — см. llm_agent.py.
 """
 from datetime import date
+from typing import Optional
 
 from ..catalog import CITIES, ORIGINS, travellers_label
 from ..models import ActionRequest, AgentReply, CheckoutRequest, FeedbackRequest, Priorities, Travellers, TripState
@@ -31,18 +36,49 @@ class RuleAgent:
     name = "rules"
 
     # ------------------------------------------------------------ хуки для LLM
-    def understand(self, text: str, s: TripState) -> nlu.ParseResult:
+    async def understand(self, text: str, s: TripState) -> nlu.ParseResult:
         return nlu.parse(text, today())
 
-    def phrase(self, draft: str, s: TripState) -> str:
+    async def phrase(self, draft: str, s: TripState) -> str:
         """Здесь LLM может переписать черновой ответ живым языком (факты не менять!)."""
         return draft
 
+    async def _finish(self, reply: AgentReply, sess: Session) -> AgentReply:
+        reply.text = await self.phrase(reply.text, sess.state)
+        return reply
+
     # ------------------------------------------------------------ события
-    def start(self, sess: Session) -> AgentReply:
+    async def start(self, sess: Session) -> AgentReply:
+        profile = await load_profile(sess.user_id)
+        return await self._finish(self._start(sess, profile), sess)
+
+    async def message(self, sess: Session, text: str) -> AgentReply:
+        p = await self.understand(text, sess.state)
+        if "reset" in p.intents:
+            sess.metrics.turns += 1
+            sess.state = TripState()
+            sess.deck = []
+            r = await self.start(sess)
+            r.text = "Начинаем заново. " + r.text
+            return r
+        return await self._finish(self._message(sess, p), sess)
+
+    async def feedback(self, sess: Session, req: FeedbackRequest) -> AgentReply:
+        comment = await self.understand(req.comment, sess.state) if req.comment and req.action == "dislike" else None
+        return await self._finish(self._feedback(sess, req, comment), sess)
+
+    async def action(self, sess: Session, req: ActionRequest) -> AgentReply:
+        if req.type == "reset":
+            return await self.message(sess, "заново")
+        return await self._finish(self._action(sess, req), sess)
+
+    async def checkout(self, sess: Session, req: CheckoutRequest) -> AgentReply:
+        return await self._finish(booking.checkout(sess, req), sess)
+
+    # ------------------------------------------------------------ логика (без ввода-вывода)
+    def _start(self, sess: Session, profile: Optional[dict]) -> AgentReply:
         s = sess.state
         s.assumptions = {"origin": "вылет из Москвы", "travellers": "2 взрослых", "nights": "7 ночей"}
-        profile = load_profile(sess.user_id)
         hello = ("Привет! Я соберу поездку по одному сообщению: направление, отель, перелёт и трансфер — "
                  "и проверю, что всё стыкуется.\n\nНапишите, чего хочется, например: "
                  "«к тёплому морю в ноябре, недорого, с ребёнком».")
@@ -58,19 +94,11 @@ class RuleAgent:
                      + (f"; в прошлый раз ездили: {', '.join(past[-2:])}" if past else "") + ".\n\nКуда хочется на этот раз?")
         return AgentReply(text=hello, quick_replies=START_QUICK, state=build_view(s))
 
-    def message(self, sess: Session, text: str) -> AgentReply:
+    def _message(self, sess: Session, p: nlu.ParseResult) -> AgentReply:
         sess.metrics.turns += 1
         s = sess.state
         ctx = Ctx()
-        p = self.understand(text, s)
         ctx.step("parse_request", ("понял: " + ", ".join(p.understood)) if p.understood else "явных параметров не нашёл")
-
-        if "reset" in p.intents:
-            sess.state = TripState()
-            sess.deck = []
-            r = self.start(sess)
-            r.text = "Начинаем заново. " + r.text
-            return r
 
         nothing = p.empty or (p.intents == ["greeting"])
         if s.stage == "start" and nothing:
@@ -84,7 +112,7 @@ class RuleAgent:
             return redeck(sess, ctx, "Не совсем понял. Можно лайкнуть вариант, написать причину дизлайка "
                                      "или поменять условия: «на 2 дня позже», «бюджет меньше», «едем с собакой».")
         if s.stage == "booked":
-            return booking.post_booking(sess, p, ctx, self.phrase)
+            return booking.post_booking(sess, p, ctx)
 
         first = s.stage == "start"
         if p.understood and first:
@@ -101,15 +129,15 @@ class RuleAgent:
         if "checkout" in p.intents:
             view = build_view(s)
             if view.can_checkout:
-                return AgentReply(text=self.phrase("Проверил стыковки — всё сходится. Открываю оформление.", s),
+                return AgentReply(text="Проверил стыковки — всё сходится. Открываю оформление.",
                                   ui_action="open_checkout", state=view, steps=ctx.steps)
             ctx.notes.append("Оформить пока не получится: " + ("сначала соберём поездку целиком." if not s.flight_id else
                              "есть ошибки в стыковках — смотрите корзину."))
         if "why" in p.intents and s.hotel_id:
             ctx.notes.append(explain_selected(s))
-        return next_step(sess, ctx, self.phrase)
+        return next_step(sess, ctx)
 
-    def feedback(self, sess: Session, req: FeedbackRequest) -> AgentReply:
+    def _feedback(self, sess: Session, req: FeedbackRequest, comment: Optional[nlu.ParseResult]) -> AgentReply:
         sess.metrics.turns += 1
         ctx = Ctx()
         if sess.state.stage == "booked":
@@ -119,30 +147,28 @@ class RuleAgent:
             feedback.like(sess, req, ctx)
         else:
             sess.metrics.dislikes += 1
-            feedback.dislike(sess, req, ctx, self.understand)
-        return next_step(sess, ctx, self.phrase)
+            feedback.dislike(sess, req, ctx, comment)
+        return next_step(sess, ctx)
 
-    def action(self, sess: Session, req: ActionRequest) -> AgentReply:
+    def _action(self, sess: Session, req: ActionRequest) -> AgentReply:
         s = sess.state
         ctx = Ctx()
         pl = req.payload
-        if req.type == "reset":
-            return self.message(sess, "заново")
         if req.type == "set_priorities":
             for k, v in pl.items():
                 if hasattr(s.priorities, k):
                     setattr(s.priorities, k, max(0, min(3, int(v))))
             ctx.step("update_trip", "новые веса: " + ", ".join(f"{k}={v}" for k, v in s.priorities.model_dump().items()))
             ctx.head.append("Учёл ваши приоритеты и пересортировал варианты.")
-            return next_step(sess, ctx, self.phrase)
+            return next_step(sess, ctx)
         if req.type == "set_params":
             p = _params_to_parse(pl)
             if s.stage == "booked":
-                return booking.post_booking(sess, p, ctx, self.phrase)
+                return booking.post_booking(sess, p, ctx)
             changed = apply_parse(sess, p, ctx)
             if changed:
                 replan(sess, changed, ctx)
-            return next_step(sess, ctx, self.phrase)
+            return next_step(sess, ctx)
         if req.type == "remove_item":
             kind = pl.get("kind")
             if kind == "hotel":
@@ -157,17 +183,14 @@ class RuleAgent:
             else:
                 s.extras = [e for e in s.extras if e.id != pl.get("id")]
                 ctx.head.append("Убрал из корзины.")
-            return next_step(sess, ctx, self.phrase, auto_transfer=kind != "transfer")
+            return next_step(sess, ctx, auto_transfer=kind != "transfer")
         if req.type == "add_extra":
             p = nlu.ParseResult(intents=[pl.get("id") or ("transfer" if pl.get("transfer") else "")],
                                 transfer_kind=pl.get("transfer"))
             if s.stage == "booked":
-                return booking.post_booking(sess, p, ctx, self.phrase)
+                return booking.post_booking(sess, p, ctx)
             apply_intents(sess, p, ctx, set())
-        return next_step(sess, ctx, self.phrase)
-
-    def checkout(self, sess: Session, req: CheckoutRequest) -> AgentReply:
-        return booking.checkout(sess, req, self.phrase)
+        return next_step(sess, ctx)
 
 
 def _params_to_parse(pl: dict) -> nlu.ParseResult:

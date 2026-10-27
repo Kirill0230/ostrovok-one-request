@@ -1,5 +1,5 @@
 {
-  "_comment": "Каталог направлений. Климат — примерные среднемесячные значения (дневная t воздуха, t моря, дней с дождём), цены — синтетика для прототипа. video — имя файла в data/videos/.",
+  "_comment": "Каталог направлений. Климат (дневная t воздуха, t моря, дней с дождём) по умолчанию берётся из data/climate.json (Open-Meteo, backend/scripts/fetch_climate.py); поле climate здесь — запасные примерные значения, цены — синтетика для прототипа. video — имя файла в data/videos/.",
   "origins": {
     "moscow": {"name": "Москва", "from": "из Москвы", "airport": "SVO", "tz": 3, "stems": ["москв", "мск"], "east_shift": 0, "west_shift": 0, "price_k": 1.0},
     "spb": {"name": "Санкт-Петербург", "from": "из Санкт-Петербурга", "airport": "LED", "tz": 3, "stems": ["питер", "петербург", "спб"], "east_shift": 0.7, "west_shift": 0.5, "price_k": 1.1},
@@ -10,6 +10,7 @@
   "cities": [
     {
       "id": "antalya", "name": "Анталья", "name_in": "в Анталье", "name_to": "в Анталью", "country": "Турция", "flag": "🇹🇷",
+      "geo": {"lat": 36.89, "lon": 30.71, "sea_lat": 36.8, "sea_lon": 30.8},
       "stems": ["анталь", "кемер", "белек", "аланья", "аланию"], "country_stems": ["турци", "турк"],
       "airport": "AYT", "tz": 3, "types": ["beach", "relax"], "tags": ["всё включено", "семьи", "аквапарки"],
       "flight_hours": 4.0, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -22,6 +23,7 @@
     },
     {
       "id": "dubai", "name": "Дубай", "name_in": "в Дубае", "name_to": "в Дубай", "country": "ОАЭ", "flag": "🇦🇪",
+      "geo": {"lat": 25.2, "lon": 55.27, "sea_lat": 25.25, "sea_lon": 55.15},
       "stems": ["дуба", "абу-даби", "абу даби"], "country_stems": ["оаэ", "эмират"],
       "airport": "DXB", "tz": 4, "types": ["beach", "city", "shopping"], "tags": ["пляж + мегаполис", "шопинг", "сервис"],
       "flight_hours": 5.0, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -34,6 +36,7 @@
     },
     {
       "id": "phuket", "name": "Пхукет", "name_in": "на Пхукете", "name_to": "на Пхукет", "country": "Таиланд", "flag": "🇹🇭",
+      "geo": {"lat": 7.89, "lon": 98.3, "sea_lat": 7.9, "sea_lon": 98.2},
       "stems": ["пхукет", "краби", "пхи-пхи"], "country_stems": ["таиланд", "тайланд"],
       "airport": "HKT", "tz": 7, "types": ["beach", "nature", "party"], "tags": ["острова", "дайвинг", "тайский массаж"],
       "flight_hours": 9.5, "direct": true, "visa": "не нужна (до 30 дней)", "visa_free": true,
@@ -46,6 +49,7 @@
     },
     {
       "id": "pattaya", "name": "Паттайя", "name_in": "в Паттайе", "name_to": "в Паттайю", "country": "Таиланд", "flag": "🇹🇭",
+      "geo": {"lat": 12.93, "lon": 100.88, "sea_lat": 12.93, "sea_lon": 100.8},
       "stems": ["паттай"], "country_stems": ["таиланд", "тайланд"],
       "airport": "UTP", "tz": 7, "types": ["beach", "party"], "tags": ["недорого", "ночная жизнь", "острова рядом"],
       "flight_hours": 9.5, "direct": true, "visa": "не нужна (до 30 дней)", "visa_free": true,
@@ -58,6 +62,7 @@
     },
     {
       "id": "nhatrang", "name": "Нячанг", "name_in": "в Нячанге", "name_to": "в Нячанг", "country": "Вьетнам", "flag": "🇻🇳",
+      "geo": {"lat": 12.24, "lon": 109.19, "sea_lat": 12.22, "sea_lon": 109.25},
       "stems": ["нячанг", "камрань"], "country_stems": ["вьетнам"],
       "airport": "CXR", "tz": 7, "types": ["beach", "relax"], "tags": ["недорого", "грязевые ванны", "морепродукты"],
       "flight_hours": 9.0, "direct": true, "visa": "не нужна (до 45 дней)", "visa_free": true,
@@ -70,6 +75,7 @@
     },
     {
       "id": "phuquoc", "name": "Фукуок", "name_in": "на Фукуоке", "name_to": "на Фукуок", "country": "Вьетнам", "flag": "🇻🇳",
+      "geo": {"lat": 10.22, "lon": 103.96, "sea_lat": 10.15, "sea_lon": 103.9},
       "stems": ["фукуок", "фу куок"], "country_stems": ["вьетнам"],
       "airport": "PQC", "tz": 7, "types": ["beach", "relax", "nature"], "tags": ["спокойно", "курорты", "закаты"],
       "flight_hours": 9.5, "direct": true, "visa": "не нужна (до 45 дней)", "visa_free": true,
@@ -82,6 +88,7 @@
     },
     {
       "id": "sanya", "name": "Санья", "name_in": "в Санье", "name_to": "в Санью", "country": "Китай (Хайнань)", "flag": "🇨🇳",
+      "geo": {"lat": 18.25, "lon": 109.51, "sea_lat": 18.17, "sea_lon": 109.45},
       "stems": ["санья", "санью", "хайнань"], "country_stems": ["китай", "китая"],
       "airport": "SYX", "tz": 8, "types": ["beach", "relax"], "tags": ["безвиз", "сетевые отели", "тропики"],
       "flight_hours": 8.5, "direct": true, "visa": "не нужна (безвиз Хайнаня)", "visa_free": true,
@@ -94,6 +101,7 @@
     },
     {
       "id": "bali", "name": "Бали", "name_in": "на Бали", "name_to": "на Бали", "country": "Индонезия", "flag": "🇮🇩",
+      "geo": {"lat": -8.72, "lon": 115.17, "sea_lat": -8.75, "sea_lon": 115.1},
       "stems": ["бали", "убуд", "чангу"], "country_stems": ["индонези"],
       "airport": "DPS", "tz": 8, "types": ["beach", "nature", "relax"], "tags": ["серфинг", "рисовые террасы", "йога"],
       "flight_hours": 14.0, "direct": false, "visa": "виза по прилёту (~$35)", "visa_free": false,
@@ -106,6 +114,7 @@
     },
     {
       "id": "srilanka", "name": "Шри-Ланка", "name_in": "на Шри-Ланке", "name_to": "на Шри-Ланку", "country": "Шри-Ланка", "flag": "🇱🇰",
+      "geo": {"lat": 6.42, "lon": 79.99, "sea_lat": 6.42, "sea_lon": 79.92},
       "stems": ["шри-ланк", "шри ланк", "ланк", "хиккадув", "бентот", "цейлон"], "country_stems": [],
       "airport": "CMB", "tz": 5.5, "types": ["beach", "nature"], "tags": ["океан", "чай", "сафари"],
       "flight_hours": 9.0, "direct": true, "visa": "электронная ETA", "visa_free": false,
@@ -118,6 +127,7 @@
     },
     {
       "id": "maldives", "name": "Мальдивы", "name_in": "на Мальдивах", "name_to": "на Мальдивы", "country": "Мальдивы", "flag": "🇲🇻",
+      "geo": {"lat": 4.18, "lon": 73.51, "sea_lat": 4.2, "sea_lon": 73.45},
       "stems": ["мальдив"], "country_stems": [],
       "airport": "MLE", "tz": 5, "types": ["beach", "relax"], "tags": ["премиум", "виллы на воде", "медовый месяц"],
       "flight_hours": 9.0, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -130,6 +140,7 @@
     },
     {
       "id": "goa", "name": "Гоа", "name_in": "на Гоа", "name_to": "на Гоа", "country": "Индия", "flag": "🇮🇳",
+      "geo": {"lat": 15.54, "lon": 73.76, "sea_lat": 15.5, "sea_lon": 73.7},
       "stems": ["гоа"], "country_stems": ["индия", "индию", "индии"],
       "airport": "GOX", "tz": 5.5, "types": ["beach", "party", "relax"], "tags": ["недорого", "атмосфера", "йога"],
       "flight_hours": 8.0, "direct": true, "visa": "электронная виза", "visa_free": false,
@@ -142,6 +153,7 @@
     },
     {
       "id": "batumi", "name": "Батуми", "name_in": "в Батуми", "name_to": "в Батуми", "country": "Грузия", "flag": "🇬🇪",
+      "geo": {"lat": 41.64, "lon": 41.64, "sea_lat": 41.65, "sea_lon": 41.58},
       "stems": ["батуми", "аджари"], "country_stems": ["грузи"],
       "airport": "BUS", "tz": 4, "types": ["beach", "food", "city"], "tags": ["близко", "вино и еда", "море летом"],
       "flight_hours": 3.0, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -154,6 +166,7 @@
     },
     {
       "id": "istanbul", "name": "Стамбул", "name_in": "в Стамбуле", "name_to": "в Стамбул", "country": "Турция", "flag": "🇹🇷",
+      "geo": {"lat": 41.01, "lon": 28.98, "sea_lat": 40.98, "sea_lon": 28.95},
       "stems": ["стамбул"], "country_stems": ["турци"],
       "airport": "IST", "tz": 3, "types": ["city", "food", "shopping"], "tags": ["история", "еда", "шопинг"],
       "flight_hours": 3.5, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -166,6 +179,7 @@
     },
     {
       "id": "bangkok", "name": "Бангкок", "name_in": "в Бангкоке", "name_to": "в Бангкок", "country": "Таиланд", "flag": "🇹🇭",
+      "geo": {"lat": 13.76, "lon": 100.5},
       "stems": ["бангкок"], "country_stems": ["таиланд", "тайланд"],
       "airport": "BKK", "tz": 7, "types": ["city", "food", "party", "shopping"], "tags": ["храмы", "стритфуд", "ночная жизнь"],
       "flight_hours": 9.0, "direct": true, "visa": "не нужна (до 30 дней)", "visa_free": true,
@@ -178,6 +192,7 @@
     },
     {
       "id": "tbilisi", "name": "Тбилиси", "name_in": "в Тбилиси", "name_to": "в Тбилиси", "country": "Грузия", "flag": "🇬🇪",
+      "geo": {"lat": 41.72, "lon": 44.79},
       "stems": ["тбилис"], "country_stems": ["грузи"],
       "airport": "TBS", "tz": 4, "types": ["city", "food"], "tags": ["вино", "старый город", "горы рядом"],
       "flight_hours": 2.75, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -190,6 +205,7 @@
     },
     {
       "id": "yerevan", "name": "Ереван", "name_in": "в Ереване", "name_to": "в Ереван", "country": "Армения", "flag": "🇦🇲",
+      "geo": {"lat": 40.18, "lon": 44.51},
       "stems": ["ереван"], "country_stems": ["армени"],
       "airport": "EVN", "tz": 4, "types": ["city", "food", "nature"], "tags": ["коньяк", "горы", "недорого"],
       "flight_hours": 3.0, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -202,6 +218,7 @@
     },
     {
       "id": "samarkand", "name": "Самарканд", "name_in": "в Самарканде", "name_to": "в Самарканд", "country": "Узбекистан", "flag": "🇺🇿",
+      "geo": {"lat": 39.65, "lon": 66.96},
       "stems": ["самарканд", "бухар"], "country_stems": ["узбекист"],
       "airport": "SKD", "tz": 5, "types": ["city", "food"], "tags": ["Шёлковый путь", "архитектура", "плов"],
       "flight_hours": 4.25, "direct": true, "visa": "не нужна", "visa_free": true,
@@ -214,6 +231,7 @@
     },
     {
       "id": "beijing", "name": "Пекин", "name_in": "в Пекине", "name_to": "в Пекин", "country": "Китай", "flag": "🇨🇳",
+      "geo": {"lat": 39.9, "lon": 116.41},
       "stems": ["пекин"], "country_stems": ["китай", "китая"],
       "airport": "PEK", "tz": 8, "types": ["city", "food"], "tags": ["Великая стена", "история", "утка по-пекински"],
       "flight_hours": 7.5, "direct": true, "visa": "не нужна (безвиз до 30 дней)", "visa_free": true,
@@ -226,6 +244,7 @@
     },
     {
       "id": "seoul", "name": "Сеул", "name_in": "в Сеуле", "name_to": "в Сеул", "country": "Южная Корея", "flag": "🇰🇷",
+      "geo": {"lat": 37.57, "lon": 126.98},
       "stems": ["сеул"], "country_stems": ["коре"],
       "airport": "ICN", "tz": 9, "types": ["city", "food", "shopping"], "tags": ["K-культура", "технологии", "корейская еда"],
       "flight_hours": 11.0, "direct": false, "visa": "не нужна (до 60 дней)", "visa_free": true,
@@ -238,6 +257,7 @@
     },
     {
       "id": "tokyo", "name": "Токио", "name_in": "в Токио", "name_to": "в Токио", "country": "Япония", "flag": "🇯🇵",
+      "geo": {"lat": 35.68, "lon": 139.69},
       "stems": ["токио", "япони", "киото"], "country_stems": [],
       "airport": "HND", "tz": 9, "types": ["city", "food", "shopping"], "tags": ["сакура", "мегаполис", "аниме"],
       "flight_hours": 14.0, "direct": false, "visa": "нужна виза", "visa_free": false,

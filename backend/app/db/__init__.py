@@ -1,28 +1,34 @@
-"""Подключение к Postgres: пул соединений и SQL-миграции.
+"""Подключение к Postgres: асинхронный пул соединений и SQL-миграции.
 
 Настройки (переменные окружения):
   DATABASE_URL  — строка подключения (по умолчанию — контейнер из docker-compose.yml);
-  DB_SCHEMA     — схема Postgres (по умолчанию public; eval создаёт себе временную).
+  DB_SCHEMA     — схема Postgres (по умолчанию public; eval создаёт себе временную);
+  DB_POOL_SIZE  — максимум соединений в пуле.
 
+Соединение берётся только на время короткой транзакции — во время работы агента (и LLM) его никто не держит.
 Миграции — файлы migrations/NNN_*.sql, применяются по порядку один раз (таблица schema_migrations).
 Новая миграция = новый файл со следующим номером; старые файлы не редактируем.
 """
+import asyncio
 import os
 import re
-import threading
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import AsyncIterator, Optional
 
 import psycopg
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+from psycopg_pool import AsyncConnectionPool
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 DEFAULT_URL = "postgresql://odin:odin@localhost:5544/odin"
 
-_pool: Optional[ConnectionPool] = None
-_lock = threading.Lock()
+_pool: Optional[AsyncConnectionPool] = None
+_lock = asyncio.Lock()
+
+
+def url() -> str:
+    return os.getenv("DATABASE_URL", DEFAULT_URL)
 
 
 def schema() -> str:
@@ -32,37 +38,18 @@ def schema() -> str:
     return name
 
 
-def _configure(conn: psycopg.Connection) -> None:
-    conn.execute(f"SET search_path TO {schema()}")
-    conn.commit()
+async def _configure(conn: psycopg.AsyncConnection) -> None:
+    await conn.execute(f"SET search_path TO {schema()}")
+    await conn.commit()
 
 
-def pool() -> ConnectionPool:
-    """Пул создаётся при первом обращении; заодно применяются миграции."""
-    global _pool
-    with _lock:
-        if _pool is None:
-            url = os.getenv("DATABASE_URL", DEFAULT_URL)
-            with psycopg.connect(url, autocommit=True) as c:
-                c.execute(f"CREATE SCHEMA IF NOT EXISTS {schema()}")
-            p = ConnectionPool(url, min_size=1, max_size=int(os.getenv("DB_POOL_SIZE", "20")),
-                               kwargs={"row_factory": dict_row}, configure=_configure, open=True)
-            _migrate(p)
-            _pool = p
-    return _pool
-
-
-@contextmanager
-def tx() -> Iterator[psycopg.Connection]:
-    """Транзакция: commit при успехе, rollback при исключении."""
-    with pool().connection() as conn:
-        with conn.transaction():
-            yield conn
-
-
-def _migrate(p: ConnectionPool) -> None:
-    with p.connection() as conn, conn.transaction():
-        conn.execute("SELECT pg_advisory_xact_lock(7212001)")  # два процесса не мигрируют одновременно
+def migrate() -> None:
+    """Применить миграции (синхронно, при старте). Два процесса не мигрируют одновременно."""
+    with psycopg.connect(url(), autocommit=True) as c:
+        c.execute(f"CREATE SCHEMA IF NOT EXISTS {schema()}")
+    with psycopg.connect(url(), row_factory=dict_row) as conn, conn.transaction():
+        conn.execute(f"SET LOCAL search_path TO {schema()}")
+        conn.execute("SELECT pg_advisory_xact_lock(7212001)")
         conn.execute("""CREATE TABLE IF NOT EXISTS schema_migrations (
                             version INTEGER PRIMARY KEY, name TEXT NOT NULL,
                             applied_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
@@ -75,18 +62,38 @@ def _migrate(p: ConnectionPool) -> None:
             conn.execute("INSERT INTO schema_migrations (version, name) VALUES (%s, %s)", (version, f.name))
 
 
-def close() -> None:
+async def pool() -> AsyncConnectionPool:
+    """Пул открывается при старте приложения (или при первом обращении), заодно применяются миграции."""
     global _pool
-    with _lock:
-        if _pool is not None:
-            _pool.close()
-            _pool = None
+    if _pool is None:
+        async with _lock:
+            if _pool is None:
+                await asyncio.to_thread(migrate)
+                p = AsyncConnectionPool(url(), min_size=1, max_size=int(os.getenv("DB_POOL_SIZE", "20")),
+                                        kwargs={"row_factory": dict_row}, configure=_configure, open=False)
+                await p.open()
+                _pool = p
+    return _pool
+
+
+@asynccontextmanager
+async def tx() -> AsyncIterator[psycopg.AsyncConnection]:
+    """Короткая транзакция: commit при успехе, rollback при исключении."""
+    async with (await pool()).connection() as conn:
+        async with conn.transaction():
+            yield conn
+
+
+async def close() -> None:
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
 
 def drop_schema() -> None:
     """Удалить текущую схему целиком — только для временных схем (eval, тесты)."""
     if schema() == "public":
         raise RuntimeError("Схему public не удаляем")
-    close()
-    with psycopg.connect(os.getenv("DATABASE_URL", DEFAULT_URL), autocommit=True) as c:
+    with psycopg.connect(url(), autocommit=True) as c:
         c.execute(f"DROP SCHEMA IF EXISTS {schema()} CASCADE")

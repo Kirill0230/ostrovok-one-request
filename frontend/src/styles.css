@@ -257,3 +257,4 @@ h2, h3, h4 { margin: 0; }
 .privacy-links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
 .privacy-links .link { font-size: 12px; font-weight: 400; }
 .privacy-links .danger { color: var(--err); }
+.disclaimer a { color: var(--blue); }

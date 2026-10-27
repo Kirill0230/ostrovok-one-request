@@ -1,6 +1,6 @@
 """Оформление (имитация оплаты) и работа после покупки: доп. услуги, смена дат с доплатой, напоминания."""
 from datetime import datetime, timedelta
-from typing import Callable, List
+from typing import List
 
 from ..catalog import CITIES, day_label, rub
 from ..models import AgentReply, AgentStep, Booking, CheckoutRequest, TripState
@@ -11,9 +11,6 @@ from .context import Ctx
 from .intents import apply_intents
 from .replan import replan
 from .trip_ops import apply_parse
-
-Phrase = Callable[[str, TripState], str]
-
 
 def _reminders(s: TripState) -> List[str]:
     h, f = current_hotel(s), current_flight(s)
@@ -32,7 +29,7 @@ def _reminders(s: TripState) -> List[str]:
     return reminders
 
 
-def checkout(sess: Session, req: CheckoutRequest, phrase: Phrase) -> AgentReply:
+def checkout(sess: Session, req: CheckoutRequest) -> AgentReply:
     s = sess.state
     view = build_view(s)
     if s.stage == "booked" and s.booking:
@@ -58,12 +55,12 @@ def checkout(sess: Session, req: CheckoutRequest, phrase: Phrase) -> AgentReply:
     text = (f"Готово! Бронь {s.booking.id} оформлена (демо, деньги не списаны).\n\n"
             f"{c['flag']} {c['name']}, {build_view(s).date_label}, итого {rub(view.total)}.\n\n"
             "Что могу сделать дальше: ранний заезд, поздний выезд, сдвинуть даты, поменять трансфер, напоминания.")
-    return AgentReply(text=phrase(text, s), ui_action="open_booking", state=build_view(s),
+    return AgentReply(text=text, ui_action="open_booking", state=build_view(s),
                       quick_replies=["Добавь ранний заезд", "А если на день позже?", "Напоминания", "Поменяй трансфер на минивэн"],
                       steps=[AgentStep(tool="checkout", summary=f"бронь {s.booking.id}, {rub(view.total)} (имитация оплаты)")])
 
 
-def post_booking(sess: Session, p: nlu.ParseResult, ctx: Ctx, phrase: Phrase) -> AgentReply:
+def post_booking(sess: Session, p: nlu.ParseResult, ctx: Ctx) -> AgentReply:
     """Изменение уже оплаченной брони: пересобираем план и считаем доплату или возврат."""
     s = sess.state
     b = s.booking
@@ -91,4 +88,4 @@ def post_booking(sess: Session, p: nlu.ParseResult, ctx: Ctx, phrase: Phrase) ->
     bad = [i for i in view.issues if i.severity == "error"]
     text = "Изменил оплаченную бронь " + b.id + ":\n" + "\n".join(f"• {x}" for x in ctx.changes) + f"\n\n{money} " \
            + ("Проверил стыковки — всё сходится ✅" if not bad else "⚠️ " + "; ".join(i.message for i in bad))
-    return AgentReply(text=phrase(text, s), state=view, steps=ctx.steps, changes=ctx.changes, ui_action="open_booking")
+    return AgentReply(text=text, state=view, steps=ctx.steps, changes=ctx.changes, ui_action="open_booking")

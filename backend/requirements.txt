@@ -5,4 +5,5 @@ psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
 pydantic==2.14.1
 PyJWT==2.15.1
+redis==8.1.0
 uvicorn[standard]==0.54.0

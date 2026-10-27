@@ -11,6 +11,7 @@ from ..models import Card, FeedbackRequest, TripState
 from ..store import Session
 from ..tools import climate, flight_hours
 from ..validator import current_flight, current_hotel
+from . import nlu
 from .context import Ctx, today
 from .replan import replan
 from .trip_ops import apply_parse, clear, sync_hotel_dates
@@ -184,8 +185,8 @@ DISLIKE_RULES: Dict[str, Dict[str, Rule]] = {
 }
 
 
-def dislike(sess: Session, req: FeedbackRequest, ctx: Ctx, understand):
-    """understand — хук агента для разбора комментария своими словами (правила или LLM)."""
+def dislike(sess: Session, req: FeedbackRequest, ctx: Ctx, comment: Optional[nlu.ParseResult] = None):
+    """comment — уже разобранный хуком агента (правила или LLM) комментарий «своими словами»."""
     s = sess.state
     card = next((c for c in sess.deck if c.id == req.card_id), None)
     s.excluded[req.kind].append(req.card_id)
@@ -194,8 +195,8 @@ def dislike(sess: Session, req: FeedbackRequest, ctx: Ctx, understand):
     if req.kind == "destination":
         s.prefs.candidates = [x for x in s.prefs.candidates if x != req.card_id]
 
-    if req.comment:
-        p = understand(req.comment, s)
+    if comment is not None:
+        p = comment
         p.destination = None if req.kind != "destination" else p.destination
         changed = apply_parse(sess, p, ctx)
         if changed:
