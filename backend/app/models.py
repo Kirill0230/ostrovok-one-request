@@ -1,8 +1,3 @@
-"""Схемы данных: состояние поездки, карточки, ответы API.
-
-TripState — единственный источник правды о поездке. И агент-заглушка, и будущий
-LLM-агент меняют только его, а фронт получает его целиком в каждом ответе.
-"""
 from datetime import date
 from typing import Any, Dict, List, Literal, Optional
 
@@ -17,16 +12,15 @@ class Travellers(BaseModel):
 
 
 class Prefs(BaseModel):
-    """Жёсткие и мягкие ограничения, выведенные из запроса и дизлайков."""
-    trip_types: List[str] = Field(default_factory=list)  # beach, city, food, party, relax, nature, shopping
-    candidates: List[str] = Field(default_factory=list)  # ограничить направления этим списком (напр. «Таиланд»)
+    trip_types: List[str] = Field(default_factory=list)
+    candidates: List[str] = Field(default_factory=list)
     max_flight_hours: Optional[float] = None
     direct_only: bool = False
     min_temp: Optional[int] = None
     max_temp: Optional[int] = None
     max_price_level: Optional[int] = None
     no_visa: bool = False
-    meal_min: Optional[str] = None  # RO < BB < HB < AI
+    meal_min: Optional[str] = None
     free_cancel: bool = False
     max_beach_m: Optional[int] = None
     min_stars: Optional[int] = None
@@ -39,7 +33,6 @@ class Prefs(BaseModel):
 
 
 class Priorities(BaseModel):
-    """Веса ранжирования 0..3. Пользователь может править их в UI."""
     price: int = 2
     flight_time: int = 1
     flexibility: int = 1
@@ -58,7 +51,7 @@ class CartItem(BaseModel):
 
 
 class TimelineEvent(BaseModel):
-    at: str  # ISO datetime, местное время точки
+    at: str
     label: str
     detail: str = ""
     status: Literal["ok", "warn", "error"] = "ok"
@@ -69,11 +62,10 @@ class Issue(BaseModel):
     code: str
     severity: Literal["info", "warn", "error"]
     message: str
-    fix: Optional[str] = None  # фраза, которую фронт может отправить агенту как быстрый ответ
+    fix: Optional[str] = None
 
 
 class Booking(BaseModel):
-    """Снимок брони для интерфейса. Контакты сюда не попадают — они только в bookings.contact_enc."""
     id: str
     created_at: str
     total: int
@@ -81,13 +73,11 @@ class Booking(BaseModel):
     changes: List[str] = Field(default_factory=list)
 
 
-# Версия схемы TripState в базе. Меняете поля несовместимо (переименование, смена типа) —
-# увеличьте версию и добавьте функцию в app/state_migrations.py.
 STATE_VERSION = 1
 
 
 class TripState(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # удалённые поля из старых сессий не ломают загрузку
+    model_config = ConfigDict(extra="ignore")
 
     origin: str = "moscow"
     date_from: Optional[date] = None
@@ -100,16 +90,24 @@ class TripState(BaseModel):
 
     destination_id: Optional[str] = None
     hotel_id: Optional[str] = None
-    hotel_check_in: Optional[date] = None  # может отличаться от date_from, если рейс прилетает на следующий день
+    hotel_check_in: Optional[date] = None
     flight_id: Optional[str] = None
     transfer_id: Optional[str] = None
     extras: List[CartItem] = Field(default_factory=list)
 
     excluded: Dict[str, List[str]] = Field(default_factory=lambda: {"destination": [], "hotel": [], "flight": []})
-    assumptions: Dict[str, str] = Field(default_factory=dict)  # поле -> человеко-понятное допущение
+    assumptions: Dict[str, str] = Field(default_factory=dict)
     asked: List[str] = Field(default_factory=list)
     stage: Literal["start", "destination", "hotel", "flight", "review", "booked"] = "start"
     booking: Optional[Booking] = None
+
+
+class VideoCredit(BaseModel):
+    author: str
+    license: str
+    license_url: str = ""
+    source_url: str
+    note: str = ""
 
 
 class Media(BaseModel):
@@ -118,6 +116,7 @@ class Media(BaseModel):
     gradient: List[str] = Field(default_factory=lambda: ["#0ea5e9", "#6366f1"])
     emoji: str = "✈️"
     ai_generated: bool = False
+    credit: Optional[VideoCredit] = None
 
 
 class Fact(BaseModel):
@@ -150,13 +149,11 @@ class Card(BaseModel):
 
 
 class AgentStep(BaseModel):
-    """Лог действий агента — показываем на фронте, чтобы было видно, что он делает, а не болтает."""
     tool: str
     summary: str
 
 
 class StateView(BaseModel):
-    """То, что фронт рисует в панели «Поездка»: состояние + производные данные."""
     trip: TripState
     origin_name: str
     destination_name: Optional[str] = None
@@ -175,12 +172,10 @@ class AgentReply(BaseModel):
     deck_kind: Optional[Literal["destination", "hotel", "flight"]] = None
     quick_replies: List[str] = Field(default_factory=list)
     steps: List[AgentStep] = Field(default_factory=list)
-    changes: List[str] = Field(default_factory=list)  # что поменялось в плане (для пересборки)
+    changes: List[str] = Field(default_factory=list)
     ui_action: Optional[Literal["open_cart", "open_checkout", "open_booking"]] = None
     state: Optional[StateView] = None
 
-
-# ---------- запросы API ----------
 
 SessionId = Field(min_length=8, max_length=64, pattern=r"^[a-f0-9]+$")
 
@@ -204,7 +199,6 @@ class FeedbackRequest(BaseModel):
 
 
 class ActionRequest(BaseModel):
-    """Прямые действия из UI без текста: правка параметров, приоритетов, удаление из корзины."""
     session_id: str = SessionId
     type: Literal["set_params", "set_priorities", "remove_item", "add_extra", "reset"]
     payload: Dict[str, Any] = Field(default_factory=dict, max_length=12)
@@ -214,6 +208,5 @@ class CheckoutRequest(BaseModel):
     session_id: str = SessionId
     contact_name: str = Field(default="", max_length=120)
     contact_email: str = Field(default="", max_length=254, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    # согласие на обработку персональных данных (152-ФЗ) — без него бронь не оформляем
     consent: bool = False
     policy_version: str = Field(default="", max_length=40)

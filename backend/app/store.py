@@ -1,17 +1,3 @@
-"""Хранилище на Postgres: сессии, история чата, профили, брони, согласия, аналитика.
-
-Главные правила:
-  • Оптимистичная блокировка. Сессия читается короткой транзакцией, агент (и LLM) работает БЕЗ открытого
-    соединения, затем всё сохраняется одной транзакцией с проверкой версии строки. Если сессию за это
-    время изменил параллельный запрос — save_session бросает SessionConflict, и запрос повторяется на
-    свежем состоянии (main._handle).
-  • Сессию видит только её владелец: чужой session_id ведёт себя как несуществующий.
-  • Персональные данные лежат только в зашифрованных колонках *_enc (security/crypto.py).
-  • Аналитика — отдельная обезличенная таблица analytics_events (analytics.py).
-
-Агент в базу напрямую не пишет: он кладёт намерения в сессию (pending_*, profile_dirty),
-а store сохраняет их при save_session.
-"""
 import logging
 import os
 import secrets
@@ -50,7 +36,7 @@ class Metrics:
 
 @dataclass
 class BookingEvent:
-    type: str  # created | changed | cancelled
+    type: str
     amount_delta: int
     description: str
 
@@ -77,11 +63,10 @@ class Session:
     state: TripState = field(default_factory=TripState)
     deck: List[Card] = field(default_factory=list)
     metrics: Metrics = field(default_factory=Metrics)
-    version: Optional[int] = None  # None — новая, ещё не сохранённая сессия
-    # что сохранить при save_session
+    version: Optional[int] = None
     pending_messages: List[Dict[str, str]] = field(default_factory=list)
     pending_booking_events: List[BookingEvent] = field(default_factory=list)
-    pending_contact: Optional[Dict[str, str]] = None  # контакты для брони — только в bookings, не в состоянии
+    pending_contact: Optional[Dict[str, str]] = None
     pending_consents: List[Consent] = field(default_factory=list)
     pending_events: List[AnalyticsEvent] = field(default_factory=list)
     profile_dirty: bool = False
@@ -98,17 +83,14 @@ class SessionNotFound(Exception):
 
 
 class SessionConflict(Exception):
-    """Сессию изменил параллельный запрос, пока работал агент."""
+    pass
 
 
 def _metrics(raw: dict) -> Metrics:
     return Metrics(**{k: v for k, v in (raw or {}).items() if k in Metrics.__dataclass_fields__})
 
 
-# ---------------------------------------------------------------- сессии
-
 def new_session(user_id: str) -> Session:
-    """Новая сессия в памяти; в базу попадёт при save_session."""
     return Session(id=uuid.uuid4().hex, user_id=user_id)
 
 
@@ -129,19 +111,17 @@ def _from_row(row: dict) -> Session:
     except StateTooNew:
         raise
     except Exception:
-        # состояние нечитаемо даже после миграций — считаем сессию истёкшей, фронт начнёт новую
         log.exception("Не удалось прочитать состояние сессии %s", row["id"])
         raise SessionNotFound(row["id"])
     try:
         deck = [Card.model_validate(c) for c in row["deck"]]
     except Exception:
-        deck = []  # колода — временные данные, при несовместимости просто пересоберётся
+        deck = []
     return Session(id=row["id"], user_id=row["user_id"], state=state, deck=deck, metrics=_metrics(row["metrics"]),
                    version=row["version"])
 
 
 async def save_session(sess: Session) -> None:
-    """Сохранить всё, что изменил агент, одной транзакцией. SessionConflict — если версия устарела."""
     state_enc = encrypt_json(sess.state.model_dump(mode="json"))
     deck = Jsonb([c.model_dump(mode="json") for c in sess.deck])
     metrics = Jsonb(asdict(sess.metrics))
@@ -161,11 +141,10 @@ async def save_session(sess: Session) -> None:
                 (state_enc, STATE_VERSION, deck, metrics, SESSION_TTL_DAYS, sess.id, sess.user_id,
                  sess.version))).fetchone()
             if not row:
-                raise SessionConflict(sess.id)  # rollback: ничего из этого запроса не сохранится
+                raise SessionConflict(sess.id)
             new_version = row["version"]
         if sess.pending_booking_events:
             await _save_booking(conn, sess)
-            # номер брони мог смениться при коллизии — перезаписываем состояние с актуальным номером
             await conn.execute("UPDATE sessions SET state_enc = %s WHERE id = %s",
                                (encrypt_json(sess.state.model_dump(mode="json")), sess.id))
         if sess.pending_messages:
@@ -210,8 +189,6 @@ async def all_metrics() -> List[Metrics]:
     return [_metrics(r["metrics"]) for r in rows]
 
 
-# ---------------------------------------------------------------- брони
-
 def new_booking_id() -> str:
     return "OST-" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
@@ -219,15 +196,15 @@ def new_booking_id() -> str:
 async def _save_booking(conn: psycopg.AsyncConnection, sess: Session) -> None:
     s = sess.state
     b = s.booking
-    from .validator import build_view, current_hotel  # локально: validator тянет tools и каталог
+    from .validator import build_view, current_hotel
     h = current_hotel(s)
     details = {"cart": [i.model_dump(mode="json") for i in build_view(s).cart], "reminders": b.reminders}
     for ev in sess.pending_booking_events:
         if ev.type == "created":
             contact = encrypt_json(sess.pending_contact) if sess.pending_contact else None
-            for _ in range(5):  # номер брони случайный: при совпадении с чужой бронью берём новый
+            for _ in range(5):
                 try:
-                    async with conn.transaction():  # savepoint — ошибка вставки не рушит всю транзакцию
+                    async with conn.transaction():
                         await conn.execute(
                             """INSERT INTO bookings (id, session_id, user_id, status, destination_id, check_in, check_out,
                                                      total, contact_enc, details)
@@ -254,7 +231,6 @@ BOOKING_PUBLIC_FIELDS = "id, status, destination_id, check_in, check_out, total,
 
 
 async def booking_history(booking_id: str, user_id: str) -> Optional[dict]:
-    """Бронь владельца с историей изменений (без контактов)."""
     async with db.tx() as conn:
         b = await (await conn.execute(f"SELECT {BOOKING_PUBLIC_FIELDS} FROM bookings WHERE id = %s AND user_id = %s",
                                       (booking_id, user_id))).fetchone()
@@ -271,8 +247,6 @@ async def bookings_stats() -> Dict[str, int]:
         rows = await (await conn.execute("SELECT status, count(*) AS n FROM bookings GROUP BY status")).fetchall()
     return {r["status"]: r["n"] for r in rows}
 
-
-# ---------------------------------------------------------------- профили
 
 def _profile(row: Optional[dict]) -> Optional[dict]:
     if not row:
@@ -308,10 +282,7 @@ async def _save_profile(conn: psycopg.AsyncConnection, user_id: str, state: Trip
         (user_id, encrypt_json(profile)))
 
 
-# ---------------------------------------------------------------- персональные данные (152-ФЗ)
-
 async def export_user_data(user_id: str) -> dict:
-    """Всё, что мы храним о пользователе, в расшифрованном виде — для права на доступ к своим данным."""
     async with db.tx() as conn:
         profile = _profile(await (await conn.execute("SELECT profile, profile_enc FROM profiles WHERE user_id = %s",
                                                      (user_id,))).fetchone())
@@ -339,9 +310,6 @@ async def export_user_data(user_id: str) -> dict:
 
 
 async def erase_user_data(user_id: str) -> dict:
-    """Удаление по запросу: сессии, история, профиль — удаляются; в бронях стираются контакты и привязка
-    к пользователю (сама бронь остаётся как запись о сделке); согласия обезличиваются.
-    Счётчики лимитов в Redis истекают сами в течение суток; аналитика и так обезличена."""
     uh = pseudonymize(user_id)
     async with db.tx() as conn:
         n_sessions = (await conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))).rowcount
@@ -357,15 +325,7 @@ async def erase_user_data(user_id: str) -> dict:
     return details
 
 
-# ---------------------------------------------------------------- обслуживание
-
 async def run_maintenance(force: bool = False) -> Optional[dict]:
-    """Очистка истёкших сессий и контактов в бронях после срока хранения + шифрование старых строк.
-
-    Каждый экземпляр сервиса периодически вызывает эту функцию, но выполняет её только один:
-    advisory-блокировка не даёт запускать параллельно, а maintenance_runs — чаще MAINTENANCE_EVERY_S.
-    Возвращает результат или None, если в этот раз работу сделал (или делает) кто-то другой.
-    """
     async with db.tx() as conn:
         got = await (await conn.execute("SELECT pg_try_advisory_xact_lock(%s) AS ok", (MAINTENANCE_LOCK,))).fetchone()
         if not got["ok"]:
@@ -394,7 +354,6 @@ async def run_maintenance(force: bool = False) -> Optional[dict]:
 
 
 async def _encrypt_legacy_rows(conn: psycopg.AsyncConnection) -> int:
-    """Зашифровать строки, сохранённые до появления шифрования (идемпотентно)."""
     n = 0
     for r in await (await conn.execute("SELECT id, state FROM sessions WHERE state IS NOT NULL")).fetchall():
         await conn.execute("UPDATE sessions SET state_enc = %s, state = NULL WHERE id = %s",
@@ -415,10 +374,7 @@ async def _encrypt_legacy_rows(conn: psycopg.AsyncConnection) -> int:
     return n
 
 
-# ---------------------------------------------------------------- аналитика
-
 async def funnel(days: int = 30) -> dict:
-    """Воронка и основные срезы по обезличенным событиям за последние days дней."""
     async with db.tx() as conn:
         def q(sql, *args):
             return conn.execute(sql, args)

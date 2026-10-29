@@ -1,14 +1,3 @@
-"""Подключение к Postgres: асинхронный пул соединений и SQL-миграции.
-
-Настройки (переменные окружения):
-  DATABASE_URL  — строка подключения (по умолчанию — контейнер из docker-compose.yml);
-  DB_SCHEMA     — схема Postgres (по умолчанию public; eval создаёт себе временную);
-  DB_POOL_SIZE  — максимум соединений в пуле.
-
-Соединение берётся только на время короткой транзакции — во время работы агента (и LLM) его никто не держит.
-Миграции — файлы migrations/NNN_*.sql, применяются по порядку один раз (таблица schema_migrations).
-Новая миграция = новый файл со следующим номером; старые файлы не редактируем.
-"""
 import asyncio
 import os
 import re
@@ -44,7 +33,6 @@ async def _configure(conn: psycopg.AsyncConnection) -> None:
 
 
 def migrate() -> None:
-    """Применить миграции (синхронно, при старте). Два процесса не мигрируют одновременно."""
     with psycopg.connect(url(), autocommit=True) as c:
         c.execute(f"CREATE SCHEMA IF NOT EXISTS {schema()}")
     with psycopg.connect(url(), row_factory=dict_row) as conn, conn.transaction():
@@ -63,7 +51,6 @@ def migrate() -> None:
 
 
 async def pool() -> AsyncConnectionPool:
-    """Пул открывается при старте приложения (или при первом обращении), заодно применяются миграции."""
     global _pool
     if _pool is None:
         async with _lock:
@@ -78,7 +65,6 @@ async def pool() -> AsyncConnectionPool:
 
 @asynccontextmanager
 async def tx() -> AsyncIterator[psycopg.AsyncConnection]:
-    """Короткая транзакция: commit при успехе, rollback при исключении."""
     async with (await pool()).connection() as conn:
         async with conn.transaction():
             yield conn
@@ -92,7 +78,6 @@ async def close() -> None:
 
 
 def drop_schema() -> None:
-    """Удалить текущую схему целиком — только для временных схем (eval, тесты)."""
     if schema() == "public":
         raise RuntimeError("Схему public не удаляем")
     with psycopg.connect(url(), autocommit=True) as c:

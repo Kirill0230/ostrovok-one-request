@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// dev: фронт на :5199, бэкенд на :8765 — проксируем API и видео
 export default defineConfig({
   plugins: [react()],
   server: {

@@ -1,19 +1,3 @@
-"""Агент на правилах: принимает события и раздаёт их модулям.
-
-Цикл на каждое событие (сообщение / лайк / дизлайк / действие из UI):
-  1. understand()   — разобрать сообщение в ParseResult (регулярки; LLM — через хук);
-  2. apply_parse    — изменить TripState (trip_ops.py);
-  3. apply_intents  — выполнить команды: «бюджет меньше», «другой отель»… (intents.py);
-  4. replan         — пересчитать зависимое, не трогая остальное (replan.py);
-  5. next_step      — показать следующий этап: направления → отели → перелёты → корзина (planner.py);
-  6. phrase()       — финальная формулировка ответа (LLM — через хук).
-
-Лайк/дизлайк — feedback.py, оплата и изменения после неё — booking.py.
-
-Публичные методы асинхронные: сетевые вызовы (LLM, база) — только в них и в хуках understand()/phrase(),
-пока они ждут ответа, сервер обслуживает других. Логика правил — обычный быстрый код без ввода-вывода.
-Хуки для LLM-команды — см. llm_agent.py.
-"""
 from datetime import date
 from typing import Optional
 
@@ -35,19 +19,19 @@ START_QUICK = ["К тёплому морю в ноябре, недорого, с
 class RuleAgent:
     name = "rules"
 
-    # ------------------------------------------------------------ хуки для LLM
     async def understand(self, text: str, s: TripState) -> nlu.ParseResult:
         return nlu.parse(text, today())
 
     async def phrase(self, draft: str, s: TripState) -> str:
-        """Здесь LLM может переписать черновой ответ живым языком (факты не менять!)."""
         return draft
+
+    async def aclose(self):
+        pass
 
     async def _finish(self, reply: AgentReply, sess: Session) -> AgentReply:
         reply.text = await self.phrase(reply.text, sess.state)
         return reply
 
-    # ------------------------------------------------------------ события
     async def start(self, sess: Session) -> AgentReply:
         profile = await load_profile(sess.user_id)
         return await self._finish(self._start(sess, profile), sess)
@@ -75,7 +59,6 @@ class RuleAgent:
     async def checkout(self, sess: Session, req: CheckoutRequest) -> AgentReply:
         return await self._finish(booking.checkout(sess, req), sess)
 
-    # ------------------------------------------------------------ логика (без ввода-вывода)
     def _start(self, sess: Session, profile: Optional[dict]) -> AgentReply:
         s = sess.state
         s.assumptions = {"origin": "вылет из Москвы", "travellers": "2 взрослых", "nights": "7 ночей"}
@@ -122,7 +105,7 @@ class RuleAgent:
                              "Подобрал похожие по сезону и условиям — если не то, скажите, что важно.")
         changed = apply_parse(sess, p, ctx)
         if first:
-            ctx.changes.clear()  # на первом сообщении менять ещё нечего — это не пересборка
+            ctx.changes.clear()
         apply_intents(sess, p, ctx, changed)
         if changed:
             replan(sess, changed, ctx)
@@ -194,7 +177,6 @@ class RuleAgent:
 
 
 def _params_to_parse(pl: dict) -> nlu.ParseResult:
-    """Форма «Параметры поездки» из UI → тот же ParseResult, что и из текста."""
     p = nlu.ParseResult()
     if pl.get("origin"):
         p.updates["origin"] = pl["origin"]

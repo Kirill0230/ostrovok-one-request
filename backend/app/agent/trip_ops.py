@@ -1,7 +1,3 @@
-"""Операции над TripState: применить разобранный запрос, сбросить зависимое, синхронизировать даты, трансфер.
-
-Каждая функция меняет состояние на месте и пишет в ctx, что сделала.
-"""
 from datetime import datetime, timedelta
 from typing import Optional, Set
 
@@ -17,7 +13,6 @@ LEVELS = ["destination", "hotel", "flight", "transfer"]
 
 
 def clear(s: TripState, level: str):
-    """Сбросить уровень плана и всё, что от него зависит (направление → отель → перелёт → трансфер)."""
     for lvl in LEVELS[LEVELS.index(level):]:
         if lvl == "destination":
             s.destination_id = None
@@ -32,7 +27,6 @@ def clear(s: TripState, level: str):
 
 
 def apply_parse(sess: Session, p: nlu.ParseResult, ctx: Ctx) -> Set[str]:
-    """Записать в состояние то, что понял разбор. Возвращает набор изменившихся групп полей."""
     s = sess.state
     changed: Set[str] = set()
     u = p.updates
@@ -120,7 +114,6 @@ def apply_parse(sess: Session, p: nlu.ParseResult, ctx: Ctx) -> Set[str]:
 
 
 def set_transfer(s: TripState, kind: Optional[str], ctx: Ctx):
-    """Выбрать трансфер нужного типа (или рекомендованный, если kind=None)."""
     h, f = current_hotel(s), current_flight(s)
     if not (h and f):
         return
@@ -133,7 +126,6 @@ def set_transfer(s: TripState, kind: Optional[str], ctx: Ctx):
 
 
 def sync_hotel_dates(s: TripState, ctx: Ctx):
-    """Заселение — в день прилёта: если рейс прилетает на следующий день, сдвигаем отель."""
     f = current_flight(s)
     if not f:
         s.hotel_check_in = None
@@ -148,7 +140,6 @@ def sync_hotel_dates(s: TripState, ctx: Ctx):
 
 
 def hotel_violation(s: TripState, h: dict) -> Optional[str]:
-    """Чем выбранный отель не подходит под текущие условия (None — подходит)."""
     p = s.prefs
     if s.travellers.pets and not h["pets_allowed"]:
         return "нельзя с питомцем"
@@ -174,7 +165,6 @@ def flight_violation(s: TripState, f: dict) -> Optional[str]:
 
 
 def hotel_loss(old: dict, new: dict) -> str:
-    """Чем хуже новый отель по сравнению со старым — для объяснения «чем пожертвовали»."""
     lost = []
     if new["stars"] < old["stars"]:
         lost.append(f"{old['stars']}★ → {new['stars']}★")
@@ -192,6 +182,5 @@ def hotel_loss(old: dict, new: dict) -> str:
 
 
 def city_in(city_id: str) -> str:
-    """«в Анталье» → «В Анталье» для начала предложения."""
     name_in = CITIES[city_id]["name_in"]
     return name_in[:1].upper() + name_in[1:]

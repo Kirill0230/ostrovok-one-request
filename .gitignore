@@ -5,3 +5,4 @@ frontend/dist/
 .env
 .DS_Store
 frontend/tsconfig.tsbuildinfo
+*.part

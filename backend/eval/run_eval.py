@@ -1,10 +1,3 @@
-"""Прогон тестовых запросов через API и метрики качества агента.
-
-Сценарий на каждый запрос: сообщение → (если агент спросил — ответ по умолчанию) →
-лайк первой карточки на каждом шаге → корзина → «а если на 2 дня позже?» → оформление.
-
-Запуск из папки backend:  .venv/bin/python -m eval.run_eval [--verbose]
-"""
 import json
 import os
 import sys
@@ -12,14 +5,13 @@ import time
 import uuid
 from pathlib import Path
 
-# прогон пишет во временную схему Postgres и удаляет её в конце — рабочие данные не трогает
 os.environ.setdefault("DB_SCHEMA", f"eval_{uuid.uuid4().hex[:8]}")
-os.environ.setdefault("RATE_LIMIT_ENABLED", "0")  # 30 сценариев подряд упёрлись бы в лимиты
+os.environ.setdefault("RATE_LIMIT_ENABLED", "0")
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from app import db  # noqa: E402
-from app.main import app  # noqa: E402
+from app import db
+from app.main import app
 
 QUERIES = json.loads((Path(__file__).parent / "queries.json").read_text(encoding="utf-8"))
 DEFAULT_ANSWER = "море в ноябре вдвоём"

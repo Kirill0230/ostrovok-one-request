@@ -1,8 +1,9 @@
 cryptography==50.0.2
 fastapi==0.162.0
+gigachat==0.2.3
 httpx==0.28.1
-psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
+psycopg[binary]==3.3.6
 pydantic==2.14.1
 PyJWT==2.15.1
 redis==8.1.0

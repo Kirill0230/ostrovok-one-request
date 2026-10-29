@@ -1,4 +1,3 @@
-// Зеркало backend/app/models.py
 export type CardKind = "destination" | "hotel" | "flight";
 
 export interface Fact { icon: string; label: string }
@@ -9,7 +8,8 @@ export interface Card {
   kind: CardKind;
   title: string;
   subtitle: string;
-  media: { video_url: string | null; poster_url: string | null; gradient: string[]; emoji: string; ai_generated: boolean };
+  media: { video_url: string | null; poster_url: string | null; gradient: string[]; emoji: string; ai_generated: boolean;
+           credit: VideoCredit | null };
   facts: Fact[];
   price: number;
   price_note: string;
@@ -77,3 +77,5 @@ export interface ChatMessage {
   text: string;
   steps?: AgentReply["steps"];
 }
+
+export interface VideoCredit { author: string; license: string; license_url: string; source_url: string; note: string }

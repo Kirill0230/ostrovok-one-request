@@ -1,6 +1,3 @@
-// Мини-интеграция с Telegram Mini App без стороннего скрипта telegram-web-app.js:
-// initData Telegram кладёт в hash URL (#tgWebAppData=...), события отправляем тем же способом, что и SDK.
-
 const STORAGE_KEY = "odin_tg_init_data";
 
 export function telegramInitData(): string | null {
@@ -8,7 +5,7 @@ export function telegramInitData(): string | null {
     const params = new URLSearchParams(window.location.hash.slice(1));
     const fromHash = params.get("tgWebAppData");
     if (fromHash) {
-      sessionStorage.setItem(STORAGE_KEY, fromHash); // hash может пропасть после навигации
+      sessionStorage.setItem(STORAGE_KEY, fromHash);
       return fromHash;
     }
     return sessionStorage.getItem(STORAGE_KEY);
@@ -21,14 +18,13 @@ function postEvent(eventType: string, eventData: Record<string, unknown> = {}) {
   const w = window as any;
   try {
     if (w.TelegramWebviewProxy?.postEvent) {
-      w.TelegramWebviewProxy.postEvent(eventType, JSON.stringify(eventData)); // мобильные клиенты
+      w.TelegramWebviewProxy.postEvent(eventType, JSON.stringify(eventData));
     } else if (w.external?.notify) {
-      w.external.notify(JSON.stringify({ eventType, eventData })); // Windows Phone
+      w.external.notify(JSON.stringify({ eventType, eventData }));
     } else if (window.parent !== window) {
-      window.parent.postMessage(JSON.stringify({ eventType, eventData }), "https://web.telegram.org"); // веб-версия
+      window.parent.postMessage(JSON.stringify({ eventType, eventData }), "https://web.telegram.org");
     }
   } catch {
-    /* вне Telegram — ничего не делаем */
   }
 }
 

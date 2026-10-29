@@ -1,9 +1,3 @@
-"""Лайк и дизлайк карточки.
-
-Лайк фиксирует выбор. Дизлайк исключает вариант и превращает причину в новое условие или вес.
-Чтобы добавить причину: впишите правило в таблицу ниже и кнопку в agent/cards.py (*_REASONS).
-Правило получает (state, card, city) и возвращает фразу «что учёл» или None.
-"""
 from typing import Callable, Dict, Optional
 
 from ..catalog import CITIES, MEALS, hours, rub
@@ -38,8 +32,6 @@ def like(sess: Session, req: FeedbackRequest, ctx: Ctx):
         ctx.step("update_trip", f"перелёт = {f['airline']}")
         sync_hotel_dates(s, ctx)
 
-
-# ---------------------------------------------------------------- правила дизлайка: направления
 
 def _month(s: TripState) -> int:
     return (s.date_from or today()).month
@@ -88,8 +80,6 @@ def _dest_visa(s, card, c):
     s.prefs.no_visa = True
     return "только без визы"
 
-
-# ---------------------------------------------------------------- отели
 
 def _data(card: Optional[Card]) -> dict:
     return card.data if card else {}
@@ -143,8 +133,6 @@ def _hotel_stars(s, card, c):
     return f"от {s.prefs.min_stars}★"
 
 
-# ---------------------------------------------------------------- перелёты
-
 def _flight_expensive(s, card, c):
     d = _data(card)
     if not d.get("total"):
@@ -186,7 +174,6 @@ DISLIKE_RULES: Dict[str, Dict[str, Rule]] = {
 
 
 def dislike(sess: Session, req: FeedbackRequest, ctx: Ctx, comment: Optional[nlu.ParseResult] = None):
-    """comment — уже разобранный хуком агента (правила или LLM) комментарий «своими словами»."""
     s = sess.state
     card = next((c for c in sess.deck if c.id == req.card_id), None)
     s.excluded[req.kind].append(req.card_id)

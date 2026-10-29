@@ -1,9 +1,3 @@
-"""Шифрование персональных данных в базе (Fernet = AES-128-CBC + HMAC-SHA256).
-
-Шифруются: состояние поездки (состав семьи, возраст детей), история чата, профиль пользователя,
-контакты в бронях. Ключи — DATA_ENCRYPTION_KEYS; первым шифруем, все пробуем при расшифровке (ротация).
-Сгенерировать ключ:  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-"""
 import hashlib
 import hmac
 import json
@@ -39,5 +33,4 @@ def decrypt_json(token: Optional[str]) -> Any:
 
 
 def pseudonymize(value: str) -> str:
-    """Необратимый отпечаток (для журналов: IP, удалённые id) — без хранения самого значения."""
     return hmac.new(config.AUTH_SECRET.encode(), value.encode(), hashlib.sha256).hexdigest()[:32]

@@ -27,7 +27,6 @@ function saveToken(t: string | null) {
     if (t) localStorage.setItem(TOKEN_KEY, t);
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
-    /* приватный режим — живём без сохранения */
   }
 }
 
@@ -45,7 +44,6 @@ async function errorFrom(res: Response): Promise<ApiError> {
   return new ApiError(res.status, msg);
 }
 
-/** Вход: в Telegram — по подписанным данным Telegram, иначе — анонимный пользователь. */
 export async function login(force = false): Promise<void> {
   if (token && !force) {
     if (!policyVersion) policyVersion = (await (await rawFetch("/api/privacy")).json()).policy_version;
@@ -65,7 +63,6 @@ async function call<T>(path: string, init: RequestInit = {}, retried = false): P
   await login();
   const res = await rawFetch(path, init);
   if (res.status === 401 && !retried) {
-    // токен истёк или недействителен — входим заново и повторяем один раз
     saveToken(null);
     await login(true);
     return call<T>(path, init, true);
@@ -91,7 +88,7 @@ export const api = {
   exportMyData: () => call<unknown>("/api/me/export"),
   deleteMyData: async () => {
     const r = await call<unknown>("/api/me", { method: "DELETE" });
-    saveToken(null); // после удаления начинаем как новый пользователь
+    saveToken(null);
     return r;
   },
 };

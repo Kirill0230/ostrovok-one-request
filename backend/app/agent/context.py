@@ -1,4 +1,3 @@
-"""Общие мелочи агента: «сегодня» и контекст одного хода."""
 import os
 from dataclasses import dataclass, field
 from datetime import date
@@ -14,7 +13,6 @@ def today() -> date:
 
 @dataclass
 class Ctx:
-    """Что накопилось за один ход: шаги для лога, изменения плана, заметки, быстрые ответы, начало ответа."""
     steps: List[AgentStep] = field(default_factory=list)
     changes: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)

@@ -1,18 +1,3 @@
-"""Скачать климатические нормы по месяцам из Open-Meteo и сохранить в data/climate.json.
-
-Запускается вручную (не на каждый запрос пользователя), результат коммитится — так демо не зависит
-от доступности Open-Meteo, а агент отвечает мгновенно.
-
-  cd backend && .venv/bin/python -m scripts.fetch_climate            # докачать недостающие города
-  cd backend && .venv/bin/python -m scripts.fetch_climate --force    # пересчитать всё
-
-Что считаем для каждого месяца:
-  air  — средняя дневная максимальная температура воздуха, °C   (Historical Weather API, ERA5)
-  rain — среднее число дней с осадками ≥ 1 мм                      (там же)
-  sea  — средняя температура поверхности моря, °C                  (Marine API; только для пляжных направлений)
-
-Данные Open-Meteo распространяются по лицензии CC BY 4.0 — нужна ссылка на источник (есть в UI и README).
-"""
 import json
 import sys
 import time
@@ -28,13 +13,11 @@ OUT_PATH = ROOT / "data" / "climate.json"
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
-AIR_PERIOD = ("2021-01-01", "2025-12-31")  # 5 полных лет (длиннее — бесплатный лимит Open-Meteo режет запросы)
-SEA_PERIOD = ("2023-01-01", "2025-12-31")  # в морском архиве температура моря есть только с конца 2022 года
-# ERA5 завышает число дней с мелкой моросью, особенно в тропиках, поэтому «дождливый день» считаем
-# от порога RAIN_DAY_MM (подобран сверкой со справочным климатом), а для анализа сохраняем и другие пороги.
+AIR_PERIOD = ("2021-01-01", "2025-12-31")
+SEA_PERIOD = ("2023-01-01", "2025-12-31")
 RAIN_THRESHOLDS = (1.0, 2.5, 5.0)
-RAIN_DAY_MM = 2.5  # при 2.5 мм средняя ошибка ~2 дня против справочных значений, при 1 мм — завышение на ~4 дня
-PAUSE_S = 20  # пауза между городами, чтобы уложиться в минутный лимит
+RAIN_DAY_MM = 2.5
+PAUSE_S = 20
 
 
 def _get(url: str, params: dict, retries: int = 4) -> dict:
@@ -43,7 +26,7 @@ def _get(url: str, params: dict, retries: int = 4) -> dict:
         try:
             with urllib.request.urlopen(full, timeout=120) as r:
                 return json.loads(r.read())
-        except Exception as e:  # сеть или лимит Open-Meteo — ждём и повторяем
+        except Exception as e:
             if attempt == retries - 1:
                 raise RuntimeError(f"Open-Meteo не ответил: {e}") from e
             time.sleep(5 * (attempt + 1))
@@ -104,7 +87,7 @@ def main():
         row = air_and_rain(g["lat"], g["lon"])
         row["sea"] = sea(g["sea_lat"], g["sea_lon"]) if "sea_lat" in g else None
         out["cities"][c["id"]] = row
-        OUT_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")  # прогресс не теряется
+        OUT_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
         print(f"{c['name']:12} воздух {row['air']}  море {row['sea']}  дожди {row['rain']}", flush=True)
         if i < len(todo) - 1:
             time.sleep(PAUSE_S)

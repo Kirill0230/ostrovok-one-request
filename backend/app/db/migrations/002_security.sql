@@ -1,6 +1,3 @@
--- Персональные данные храним только в зашифрованном виде (*_enc). Старые открытые колонки
--- остаются на время перехода: при старте сервер шифрует существующие строки и обнуляет их
--- (store.encrypt_legacy_rows), новые записи пишутся сразу в *_enc.
 ALTER TABLE sessions ALTER COLUMN state DROP NOT NULL;
 ALTER TABLE sessions ADD COLUMN state_enc TEXT;
 
@@ -11,10 +8,8 @@ ALTER TABLE profiles ALTER COLUMN profile DROP NOT NULL;
 ALTER TABLE profiles ADD COLUMN profile_enc TEXT;
 
 ALTER TABLE bookings ADD COLUMN contact_enc TEXT;
-ALTER TABLE bookings ADD COLUMN pii_erased_at TIMESTAMPTZ;  -- когда контакты удалены (срок хранения или запрос)
+ALTER TABLE bookings ADD COLUMN pii_erased_at TIMESTAMPTZ;
 
--- Согласия на обработку персональных данных (152-ФЗ): кто, на какую версию политики, когда, откуда.
--- IP хранится только как необратимый отпечаток.
 CREATE TABLE consents (
     id              BIGSERIAL PRIMARY KEY,
     user_id         TEXT NOT NULL,
@@ -26,7 +21,6 @@ CREATE TABLE consents (
 );
 CREATE INDEX consents_user_idx ON consents (user_id);
 
--- Журнал действий с персональными данными: выгрузка, удаление по запросу, удаление по сроку
 CREATE TABLE privacy_log (
     id          BIGSERIAL PRIMARY KEY,
     user_hash   TEXT NOT NULL,

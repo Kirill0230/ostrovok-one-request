@@ -1,10 +1,3 @@
-"""Обезличенная продуктовая аналитика.
-
-После каждого ответа агента пишем события в analytics_events (store.save_session, та же транзакция).
-В событиях НЕТ: user_id, текста сообщений, контактов, возраста детей. Есть: этап, тип действия,
-id направления из каталога, причины дизлайков, число взрослых/детей, сумма с округлением до 10 000 ₽.
-Отчёт — GET /api/analytics/funnel (store.funnel).
-"""
 from typing import Optional
 
 from .models import AgentReply, FeedbackRequest

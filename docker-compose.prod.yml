@@ -1,8 +1,6 @@
-# Продакшн: docker compose -f docker-compose.prod.yml --env-file .env up -d --build
-# Наружу открыт только Caddy (80/443, TLS). Приложение и база доступны лишь внутри сети compose.
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16.13-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: odin
@@ -16,7 +14,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.12-alpine
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "volatile-ttl"]
     healthcheck:
@@ -39,11 +37,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       TRUST_PROXY: "1"
       FORCE_HTTPS: "1"
-    volumes:
-      - ./data/videos:/srv/data/videos:ro
+      FORWARDED_ALLOW_IPS: "*"
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.10.2-alpine
     restart: unless-stopped
     depends_on: [app]
     ports:

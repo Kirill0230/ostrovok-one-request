@@ -1,4 +1,3 @@
-"""Намерения-команды из сообщения: «бюджет меньше», «другой отель», «ранний заезд», «минивэн» и т.п."""
 from typing import Set
 
 from ..catalog import CITIES, rub
@@ -13,7 +12,6 @@ EXTRAS = {"early_checkin": "Ранний заезд (с 08:00)", "late_checkout"
 
 
 def apply_intents(sess: Session, p: nlu.ParseResult, ctx: Ctx, changed: Set[str]):
-    """Выполнить команды. Пополняет changed, чтобы replan пересчитал зависимое."""
     s = sess.state
     total = build_view(s).total
     if "reduce_budget" in p.intents:

@@ -173,7 +173,7 @@ export default function TripPanel({ view, busy, onAction, onSend, onCheckout, on
           </button>
         </div>
       )}
-      <p className="disclaimer">Прототип: отели, рейсы и цены — синтетические данные, оплата имитируется. Видео направлений сгенерированы ИИ.
+      <p className="disclaimer">Прототип: отели, рейсы и цены — синтетические данные, оплата имитируется. Видео направлений — фрагменты роликов Wikimedia Commons, автор и лицензия подписаны на карточке.
         Климат — средние за 2021–2025 по данным <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0).</p>
       <nav className="privacy-links">
         <a href="/privacy.html" target="_blank" rel="noopener">Политика конфиденциальности</a>

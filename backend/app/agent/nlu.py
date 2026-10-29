@@ -1,9 +1,3 @@
-"""Разбор запроса на правилах (заглушка до подключения LLM).
-
-LLM-агент заменит этот модуль: ему нужно выдавать тот же ParseResult (или сразу
-вызывать update_trip с теми же полями). Здесь — регулярки по типовым формулировкам,
-чтобы сквозной сценарий работал без модели.
-"""
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -21,7 +15,7 @@ MONTH_STEMS = [("январ", 1), ("феврал", 2), ("март", 3), ("апр
 
 @dataclass
 class ParseResult:
-    updates: Dict = field(default_factory=dict)      # origin, date_from, nights, budget, budget_level
+    updates: Dict = field(default_factory=dict)
     travellers: Dict = field(default_factory=dict)
     prefs: Dict = field(default_factory=dict)
     priorities: Dict = field(default_factory=dict)
@@ -60,7 +54,7 @@ def _month_date(month: int, today: date, day: Optional[int] = None) -> date:
     if month == today.month:
         return today + timedelta(days=7)
     d = date(year, month, 5)
-    return d + timedelta(days=(5 - d.weekday()) % 7)  # ближайшая суббота с 5-го числа
+    return d + timedelta(days=(5 - d.weekday()) % 7)
 
 
 def _month_in(text: str) -> Optional[int]:
@@ -74,7 +68,6 @@ def parse(raw: str, today: date) -> ParseResult:
     t = " " + raw.lower().replace("ё", "е") + " "
     r = ParseResult()
 
-    # ---------- сброс / служебные намерения
     if re.search(r"\b(заново|сначала|сброс|начать с нуля|новая поездка)\b", t):
         r.intents.append("reset")
         return r
@@ -108,7 +101,6 @@ def parse(raw: str, today: date) -> ParseResult:
     if re.search(r"друг\w* (рейс|билет|перел)|поменяй (рейс|билет)", t):
         r.intents.append("other_flight")
 
-    # ---------- сдвиг дат
     m = re.search(r"на (\d+|\w+) (дн\w*|недел\w*) (позже|раньше)|(позже|раньше) на (\d+|\w+) (дн\w*|недел\w*)", t)
     if m:
         n_s, unit, direction = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(5), m.group(6), m.group(4))
@@ -120,7 +112,6 @@ def parse(raw: str, today: date) -> ParseResult:
     elif re.search(r"на день (позже|раньше)", t):
         r.shift_days = 1 if "позже" in t else -1
 
-    # ---------- даты
     m = re.search(r"с (\d{1,2})(?:\s*(\w+))? по (\d{1,2}) (\w+)", t)
     if m and _month_in(m.group(4)):
         mon2 = _month_in(m.group(4))
@@ -176,7 +167,6 @@ def parse(raw: str, today: date) -> ParseResult:
                 r.updates["date_from"] = d
                 r.understood.append(f"в {MONTHS_PREP[mon - 1]}")
 
-    # ---------- длительность
     m = re.search(r"на (\d+|\w+) (ноч\w*|дн\w*|недел\w*)(?! (позже|раньше))", t)
     if m and _num(m.group(1)):
         n = _num(m.group(1))
@@ -200,7 +190,6 @@ def parse(raw: str, today: date) -> ParseResult:
         r.updates["nights"] = 28
         r.understood.append("на месяц")
 
-    # ---------- откуда
     m = re.search(r"\bиз (\w+)", t)
     if m:
         for oid, o in ORIGINS.items():
@@ -208,7 +197,6 @@ def parse(raw: str, today: date) -> ParseResult:
                 r.updates["origin"] = oid
                 r.understood.append(o["from"])
 
-    # ---------- бюджет
     m = re.search(r"(\d+[\d\s]*[.,]?\d*)\s*(млн|миллион)", t)
     if m:
         r.updates["budget"] = int(float(m.group(1).replace(" ", "").replace(",", ".")) * 1_000_000)
@@ -236,7 +224,6 @@ def parse(raw: str, today: date) -> ParseResult:
     if re.search(r"можно дороже|бюджет больше|получше|подороже", t):
         r.intents.append("increase_budget")
 
-    # ---------- кто едет
     kids = None
     m = re.search(r"(\d+|двумя|тремя|двое|трое) (дет|ребен)", t)
     if m:
@@ -278,7 +265,6 @@ def parse(raw: str, today: date) -> ParseResult:
     if re.search(r"без (собак|питомц|кот)", t):
         r.travellers["pets"] = False
 
-    # ---------- тип отдыха и ограничения
     types = {
         "beach": r"мор[еяю]|пляж|океан|купат|загора|остров|побережь",
         "city": r"город|экскурси|музе|архитектур|погулять|достопримеч|истори",
@@ -316,7 +302,7 @@ def parse(raw: str, today: date) -> ParseResult:
         r.prefs["meal_min"] = "AI"
         r.understood.append("всё включено")
         if "city" not in r.add_types and "beach" not in r.add_types:
-            r.add_types.append("beach")  # «всё включено» — это почти всегда пляжный отель
+            r.add_types.append("beach")
     elif re.search(r"полупансион", t):
         r.prefs["meal_min"] = "HB"
     elif re.search(r"с завтрак", t):
@@ -338,7 +324,6 @@ def parse(raw: str, today: date) -> ParseResult:
     if re.search(r"без ночн|не ночью|днем лететь|дневн\w* рейс", t):
         r.prefs["daytime_flights"] = True
 
-    # ---------- направление
     words = re.findall(r"[а-яa-z\-]+", t)
     found_city = [cid for cid, c in CITIES.items() if any(w.startswith(st) for w in words for st in c["stems"])]
     found_country = [cid for cid, c in CITIES.items() if any(w.startswith(st) for w in words for st in c["country_stems"])]
@@ -350,7 +335,6 @@ def parse(raw: str, today: date) -> ParseResult:
         if neg_ids:
             r.prefs["exclude"] = neg_ids
     if not found_city and not found_country:
-        # «хочу в Сочи»: место с большой буквы, которого нет в каталоге
         for m in re.finditer(r"\b(?:в|во|на)\s+([А-ЯЁ][а-яё\-]+)", raw):
             word = m.group(1).lower()
             if not _month_in(word) and word not in ("море", "майские"):
@@ -364,7 +348,6 @@ def parse(raw: str, today: date) -> ParseResult:
         r.candidates = list(dict.fromkeys(found_city + found_country))
         r.understood.append("направления: " + ", ".join(CITIES[c]["name"] for c in r.candidates))
 
-    # ---------- приоритеты
     if re.search(r"главное (цена|дешев)|подешевле", t):
         r.priorities["price"] = 3
     if re.search(r"с ребен|с детьми|с малыш", t):

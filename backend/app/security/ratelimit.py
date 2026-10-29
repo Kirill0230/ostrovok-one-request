@@ -1,9 +1,3 @@
-"""Лимиты запросов в Redis — общие для всех экземпляров сервиса и не нагружают Postgres.
-
-Счётчик фиксированного окна: INCR ключа «лимит:окно» + срок жизни ключа = длина окна.
-Если Redis недоступен, запрос пропускается (fail-open) и пишется ошибка в лог: падение Redis не должно
-класть весь сервис. Общий суточный потолок на LLM при этом не действует — за Redis нужен мониторинг.
-"""
 import logging
 import math
 import os
@@ -38,7 +32,6 @@ async def close() -> None:
 
 
 async def hit(key: str, limit: int, window_s: int) -> None:
-    """Засчитать запрос; при превышении — 429 с Retry-After."""
     if not config.RATE_LIMIT_ENABLED or limit <= 0:
         return
     now = time.time()
@@ -64,7 +57,6 @@ def client_ip(request: Request) -> str:
 
 
 async def limit_agent_call(user: Identity) -> None:
-    """Каждое обращение к агенту (а с LLM — это токены): лимит в минуту, в сутки и общий потолок сервиса."""
     await hit(f"agent:min:{user.user_id}", config.LIMIT_AGENT_PER_MIN, 60)
     await hit(f"agent:day:{user.user_id}", config.LIMIT_AGENT_PER_DAY, 86400)
     await hit("agent:global:day", config.LIMIT_AGENT_GLOBAL_PER_DAY, 86400)

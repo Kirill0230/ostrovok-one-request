@@ -1,12 +1,9 @@
--- Профиль пользователя — память между сессиями
 CREATE TABLE profiles (
     user_id     TEXT PRIMARY KEY,
     profile     JSONB NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Сессия: состояние поездки (JSON с версией схемы), текущая колода и метрики.
--- История чата — в отдельной таблице messages, чтобы строка сессии не росла.
 CREATE TABLE sessions (
     id             TEXT PRIMARY KEY,
     user_id        TEXT,
@@ -30,7 +27,6 @@ CREATE TABLE messages (
 );
 CREATE INDEX messages_session_idx ON messages (session_id, id);
 
--- Брони живут дольше сессий: при удалении сессии бронь остаётся (session_id → NULL)
 CREATE TABLE bookings (
     id              TEXT PRIMARY KEY,
     session_id      TEXT REFERENCES sessions (id) ON DELETE SET NULL,
@@ -42,14 +38,13 @@ CREATE TABLE bookings (
     total           INTEGER NOT NULL,
     contact_name    TEXT,
     contact_email   TEXT,
-    details         JSONB NOT NULL,  -- снимок: состав корзины, напоминания
+    details         JSONB NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX bookings_user_idx ON bookings (user_id);
 CREATE INDEX bookings_status_idx ON bookings (status);
 
--- История брони: создание, каждое изменение с суммой доплаты/возврата, отмена
 CREATE TABLE booking_events (
     id            BIGSERIAL PRIMARY KEY,
     booking_id    TEXT NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,

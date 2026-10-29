@@ -1,9 +1,3 @@
-"""Следующий шаг сценария: чего не хватает в плане — то и показываем.
-
-Этапы идут по порядку: направление → отель → перелёт → корзина. Каждый этап — функция
-в STAGES: (условие «этап ещё не пройден», функция-показ). Чтобы добавить этап (поезд, экскурсии),
-допишите функцию и вставьте её в STAGES перед корзиной.
-"""
 import time
 from datetime import timedelta
 from typing import List, NamedTuple, Optional
@@ -58,7 +52,6 @@ def _hotels(sess: Session, ctx: Ctx, auto_transfer: bool) -> StageResult:
     c = CITIES[s.destination_id]
     budget_left = None
     if s.budget:
-        # сколько остаётся на отель после перелёта и трансфера
         est = estimate_trip(c, s.origin, s.date_from, s.nights, s.travellers)
         f = current_flight(s)
         budget_left = s.budget - (f["total"] if f else est["flights"]) - est["transfer"]
@@ -116,7 +109,6 @@ def _review(sess: Session, ctx: Ctx, auto_transfer: bool) -> StageResult:
     return StageResult([], None, main, "open_cart")
 
 
-# этап показывается, если условие истинно; последний (корзина) — когда всё выбрано
 STAGES: List[tuple] = [
     (lambda s: not s.destination_id, _destinations),
     (lambda s: not s.hotel_id, _hotels),
@@ -128,7 +120,7 @@ STAGES: List[tuple] = [
 def _ensure_dates(s: TripState):
     if not s.date_from:
         d = today() + timedelta(days=14)
-        d += timedelta(days=(5 - d.weekday()) % 7)  # ближайшая суббота через 2 недели
+        d += timedelta(days=(5 - d.weekday()) % 7)
         s.date_from = d
         s.assumptions["dates"] = f"даты {range_label(d, d + timedelta(days=s.nights))}"
     if not s.destination_id and s.prefs.candidates and len(s.prefs.candidates) == 1:
@@ -150,7 +142,6 @@ def next_step(sess: Session, ctx: Ctx, auto_transfer: bool = True) -> AgentReply
         parts.append("Что поменял в плане:\n" + "\n".join(f"• {x}" for x in ctx.changes))
     parts += ctx.notes
     if res.kind == "destination" and "assumptions" not in s.asked and s.assumptions:
-        # порядок фиксированный: JSONB в Postgres не сохраняет порядок ключей
         keys = sorted(s.assumptions, key=lambda k: ASSUMPTION_ORDER.index(k) if k in ASSUMPTION_ORDER else 99)
         parts.append("Считаю, что " + ", ".join(s.assumptions[k] for k in keys) + " — поправьте, если не так.")
         s.asked.append("assumptions")
@@ -162,14 +153,12 @@ def next_step(sess: Session, ctx: Ctx, auto_transfer: bool = True) -> AgentReply
 
 
 def redeck(sess: Session, ctx: Ctx, text: str) -> AgentReply:
-    """Не поняли сообщение — повторяем текущую колоду с подсказками."""
     return AgentReply(text=text, cards=sess.deck, deck_kind=sess.deck[0].kind if sess.deck else None,
                       quick_replies=["На 2 дня позже", "Бюджет меньше", "Едем с собакой"], steps=ctx.steps,
                       state=build_view(sess.state))
 
 
 def explain_selected(s: TripState) -> str:
-    """Ответ на «почему?»: объяснение по выбранным отелю и рейсу + текущие веса."""
     lines = []
     h = current_hotel(s)
     if h:

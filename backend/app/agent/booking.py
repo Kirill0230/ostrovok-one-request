@@ -1,4 +1,3 @@
-"""Оформление (имитация оплаты) и работа после покупки: доп. услуги, смена дат с доплатой, напоминания."""
 from datetime import datetime, timedelta
 from typing import List
 
@@ -33,7 +32,6 @@ def checkout(sess: Session, req: CheckoutRequest) -> AgentReply:
     s = sess.state
     view = build_view(s)
     if s.stage == "booked" and s.booking:
-        # повторный запрос (двойной клик «Оплатить») — второй брони не создаём
         return AgentReply(text=f"Бронь {s.booking.id} уже оформлена — повторно ничего не списываем.",
                           ui_action="open_booking", state=view)
     if not view.can_checkout:
@@ -61,7 +59,6 @@ def checkout(sess: Session, req: CheckoutRequest) -> AgentReply:
 
 
 def post_booking(sess: Session, p: nlu.ParseResult, ctx: Ctx) -> AgentReply:
-    """Изменение уже оплаченной брони: пересобираем план и считаем доплату или возврат."""
     s = sess.state
     b = s.booking
     before = build_view(s).total

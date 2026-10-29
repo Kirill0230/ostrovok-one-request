@@ -1,4 +1,3 @@
-"""Выбор реализации агента: AGENT=rules (по умолчанию) или AGENT=llm."""
 import os
 
 from .rule_agent import RuleAgent

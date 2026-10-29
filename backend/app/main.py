@@ -1,10 +1,3 @@
-"""HTTP API. Каждый ответ агента — AgentReply: {text, cards, deck_kind, quick_replies, steps, changes, ui_action, state}.
-
-Все ручки, кроме health/privacy/catalog/auth, требуют Authorization: Bearer <token> (security/auth.py).
-Сессии и брони видит только их владелец.
-
-Сервер асинхронный: пока агент ждёт LLM, поток и соединение с базой никто не держит.
-"""
 import asyncio
 import hmac
 import logging
@@ -15,7 +8,7 @@ from typing import Awaitable, Callable, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import analytics, config, db
@@ -34,14 +27,14 @@ from .store import (SESSION_TTL_DAYS, Consent, Session, SessionConflict, Session
 from .validator import build_view
 
 log = logging.getLogger(__name__)
-MAINTENANCE_CHECK_S = 300  # как часто экземпляр проверяет, не пора ли обслуживание (запустит только один)
+MAINTENANCE_CHECK_S = 300
 SAVE_ATTEMPTS = 3
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    config.validate()  # в продакшне без секретов не стартуем
-    await db.pool()  # подключение + миграции при старте, а не на первом запросе
+    config.validate()
+    await db.pool()
 
     async def maintenance_loop():
         while True:
@@ -54,6 +47,7 @@ async def lifespan(_: FastAPI):
     task = asyncio.create_task(maintenance_loop())
     yield
     task.cancel()
+    await agent.aclose()
     await ratelimit.close()
     await db.close()
 
@@ -71,18 +65,12 @@ NOT_FOUND = "Сессия не найдена — создайте новую ч
 
 async def _handle(user: Identity, session_id: str, user_text: Optional[str], event: str,
                   fn: Callable[[Session], Awaitable[AgentReply]], **track) -> AgentReply:
-    """Прочитать сессию → агент без открытой транзакции → сохранить с проверкой версии.
-
-    Если параллельный запрос успел изменить сессию (двойной свайп, двойной клик «Оплатить»), сохранение
-    отклоняется, и запрос повторяется на свежем состоянии — так ни одно изменение не теряется.
-    """
     for attempt in range(SAVE_ATTEMPTS):
         try:
             sess = await load_session(user.user_id, session_id)
         except SessionNotFound:
             raise HTTPException(404, NOT_FOUND)
         except StateTooNew:
-            # сессию записала более новая версия кода (откат деплоя) — не трогаем её, чтобы не потерять данные
             raise HTTPException(409, "Сессия сохранена более новой версией сервиса")
         stage_before = sess.state.stage
         if user_text:
@@ -99,16 +87,24 @@ async def _handle(user: Identity, session_id: str, user_text: Optional[str], eve
 
 
 async def agent_user(user: Identity = Depends(current_user)) -> Identity:
-    """Пользователь + лимит на обращения к агенту (с LLM каждое обращение стоит денег)."""
     await ratelimit.limit_agent_call(user)
     return user
 
 
-# ---------------------------------------------------------------- публичное
+@app.get("/health")
+async def liveness():
+    try:
+        async with db.tx() as conn:
+            await conn.execute("SELECT 1")
+    except Exception:
+        log.exception("Healthcheck: база недоступна")
+        return JSONResponse({"status": "error", "db": "unavailable"}, status_code=503)
+    return {"status": "ok"}
+
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "agent": agent.name, "videos": sum(1 for c in CITIES.values() if media_urls(c)["video_url"]),
+    return {"ok": True, "agent": agent.name, "llm": getattr(agent, "stats", None), "videos": sum(1 for c in CITIES.values() if media_urls(c)["video_url"]),
             "climate": {"source": CLIMATE_META.get("source", "примерные значения из cities.json"),
                         "cities_from_open_meteo": sum(1 for c in CITIES.values() if c.get("climate_source") == "open-meteo")}}
 
@@ -126,8 +122,6 @@ async def catalog():
             "destinations": [{"id": c["id"], "name": c["name"], "country": c["country"], "flag": c["flag"],
                               **media_urls(c)} for c in CITIES.values()]}
 
-
-# ---------------------------------------------------------------- вход
 
 def _token_reply(user_id: str, kind: str) -> dict:
     return {"token": issue_token(user_id, kind), "user_id": user_id, "kind": kind,
@@ -149,8 +143,6 @@ async def auth_telegram(req: TelegramAuthRequest, request: Request):
         raise HTTPException(401, f"Вход через Telegram не прошёл проверку: {e}")
     return _token_reply(f"tg-{int(tg_user['id'])}", "telegram")
 
-
-# ---------------------------------------------------------------- агент
 
 @app.post("/api/session")
 async def create_session(user: Identity = Depends(agent_user)):
@@ -206,42 +198,34 @@ async def checkout(req: CheckoutRequest, request: Request, user: Identity = Depe
 
 @app.get("/api/bookings/{booking_id}")
 async def booking(booking_id: str, user: Identity = Depends(current_user)):
-    """Своя бронь со всей историей изменений."""
     b = await booking_history(booking_id, user.user_id)
     if not b:
         raise HTTPException(404, "Бронь не найдена")
     return b
 
 
-# ---------------------------------------------------------------- мои данные (152-ФЗ)
-
 @app.get("/api/me/export")
 async def my_data(user: Identity = Depends(current_user)):
-    """Всё, что сервис хранит о пользователе."""
     await ratelimit.hit(f"export:{user.user_id}", 10, 3600)
     return await export_user_data(user.user_id)
 
 
 @app.delete("/api/me")
 async def delete_my_data(user: Identity = Depends(current_user)):
-    """Удалить данные пользователя (брони остаются обезличенной записью о сделке)."""
     return {"deleted": True, **(await erase_user_data(user.user_id))}
 
-
-# ---------------------------------------------------------------- служебное
 
 async def admin(x_admin_token: Optional[str] = Header(default=None)) -> None:
     if not config.ADMIN_TOKEN:
         if config.PROD:
             raise HTTPException(403, "Закрыто")
-        return  # в разработке открыто
+        return
     if not x_admin_token or not hmac.compare_digest(x_admin_token, config.ADMIN_TOKEN):
         raise HTTPException(403, "Нужен X-Admin-Token")
 
 
 @app.get("/api/metrics", dependencies=[Depends(admin)])
 async def metrics():
-    """Метрики качества по всем сессиям в базе (только агрегаты, без персональных данных)."""
     ms = [m for m in await all_metrics() if m.turns]
     ttfr = [m.first_reco_at - m.started_at for m in ms if m.first_reco_at]
     n = len(ms) or 1
@@ -258,14 +242,12 @@ async def metrics():
 
 @app.get("/api/analytics/funnel", dependencies=[Depends(admin)])
 async def analytics_funnel(days: int = 30):
-    """Воронка, причины дизлайков и популярность направлений по обезличенным событиям."""
     return await funnel(max(1, min(days, 365)))
 
 
 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="videos")
 
-# собранный фронт (npm run build) раздаём с того же сервера — для демо и Telegram Mini App
 DIST = (Path(__file__).resolve().parents[2] / "frontend" / "dist").resolve()
 if DIST.exists():
     app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
@@ -273,6 +255,6 @@ if DIST.exists():
     @app.get("/{path:path}")
     async def spa(path: str):
         f = (DIST / path).resolve()
-        if path and f.is_file() and f.is_relative_to(DIST):  # без выхода за пределы dist (../)
+        if path and f.is_file() and f.is_relative_to(DIST):
             return FileResponse(f)
         return FileResponse(DIST / "index.html")

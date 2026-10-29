@@ -1,4 +1,3 @@
-"""Превращает результаты инструментов в карточки для фронта (общий код для любого агента)."""
 from datetime import datetime
 from typing import List
 
@@ -32,7 +31,7 @@ def destination_card(opt: dict, s: TripState) -> Card:
     return Card(
         id=c["id"], kind="destination", title=f"{c['name']}", subtitle=f"{c['flag']} {c['country']} · {c['pitch']}",
         media=Media(video_url=urls["video_url"], poster_url=urls["poster_url"], gradient=c["gradient"], emoji=c["emoji"],
-                    ai_generated=bool(urls["video_url"])),
+                    ai_generated=bool(urls["video_url"]) and not urls["credit"], credit=urls["credit"]),
         facts=[Fact(icon="🌡", label=weather), Fact(icon="✈️", label=f"{hours(opt['flight_hours'])}" + ("" if c["direct"] else ", пересадка")),
                Fact(icon="☔", label=f"{cl['rain']} дн. дождя"), Fact(icon="🛂", label=c["visa"])],
         price=e["total"], price_note=f"≈ за всё на {s.nights} ноч. (перелёт, отель, трансфер)",
@@ -43,6 +42,13 @@ def destination_card(opt: dict, s: TripState) -> Card:
         dislike_reasons=DEST_REASONS,
         data={"highlights": c["highlights"], "estimate": e, "city_id": c["id"]},
     )
+
+
+def _city_media(c: dict, emoji: str) -> Media:
+    from ..catalog import media_urls
+    urls = media_urls(c)
+    return Media(video_url=urls["video_url"], poster_url=urls["poster_url"], gradient=c["gradient"], emoji=emoji,
+                 ai_generated=bool(urls["video_url"]) and not urls["credit"], credit=urls["credit"])
 
 
 def hotel_card(opt: dict, s: TripState) -> Card:
@@ -59,7 +65,7 @@ def hotel_card(opt: dict, s: TripState) -> Card:
     return Card(
         id=h["id"], kind="hotel", title=h["name"],
         subtitle=f"{'★' * h['stars']} · {h['rating']} ({h['reviews']} отзывов) · {c['name']}",
-        media=Media(gradient=c["gradient"], emoji=h["emoji"]),
+        media=_city_media(c, emoji=h["emoji"]),
         facts=facts, price=h["total"], price_note=f"за {h['nights']} ноч. · {rub(h['night_price'])}/ночь",
         badges=h["amenities"][:3], why=opt["why"], tradeoffs=opt["tradeoffs"], risks=opt["risks"], score=opt["score"],
         compare={"Цена": rub(h["total"]), "Звёзды": "★" * h["stars"], "Рейтинг": str(h["rating"]), "Питание": MEALS[h["meal"]],

@@ -130,7 +130,13 @@ function DestinationBody({ card }: { card: Card }) {
         <div className="media-shade" />
         <div className="media-top">
           {card.media.ai_generated && videoOk && <span className="pill dark">🎬 видео сгенерировано ИИ</span>}
-          {video && videoOk && <button className="pill dark" onClick={() => setMuted(!muted)}>{muted ? "🔇" : "🔊"}</button>}
+          {card.media.credit && videoOk && (
+            <a className="pill dark credit" href={card.media.credit.source_url} target="_blank" rel="noopener noreferrer"
+               title={`${card.media.credit.author} · ${card.media.credit.license}${card.media.credit.note ? " · " + card.media.credit.note : ""}`}>
+              📹 {card.media.credit.author} · {card.media.credit.license}
+            </a>
+          )}
+          {video && videoOk && !card.media.credit && <button className="pill dark" onClick={() => setMuted(!muted)}>{muted ? "🔇" : "🔊"}</button>}
         </div>
         <div className="media-bottom">
           <div className="badges">{card.badges.map((b) => <span key={b} className="pill light">{b}</span>)}</div>
@@ -162,9 +168,17 @@ function DestinationBody({ card }: { card: Card }) {
 
 function OptionBody({ card }: { card: Card }) {
   const bg = `linear-gradient(135deg, ${card.media.gradient[0]}, ${card.media.gradient[1] ?? card.media.gradient[0]})`;
+  const video = mediaUrl(card.media.video_url);
   return (
     <div className="option">
-      <div className="option-head" style={{ background: bg }}>
+      <div className={`option-head${video ? " with-video" : ""}`} style={{ background: bg }}>
+        {video && <video key={card.media.video_url} src={video} autoPlay loop muted playsInline aria-hidden="true" />}
+        {video && <div className="option-shade" />}
+        {card.media.credit && (
+          <a className="pill dark credit option-credit" href={card.media.credit.source_url} target="_blank" rel="noopener noreferrer">
+            📹 {card.media.credit.author} · {card.media.credit.license}
+          </a>
+        )}
         <span className="option-emoji">{card.media.emoji}</span>
         <div>
           <h3>{card.title}</h3>

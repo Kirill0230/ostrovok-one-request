@@ -1,8 +1,3 @@
-"""Сборка корзины и проверка стыковок — обычным кодом, без LLM.
-
-Проверяет цепочку «вылет → прилёт → паспортный контроль → трансфер → заселение → ... →
-выезд → трансфер → вылет обратно», совпадение дат отеля и билетов, бюджет, питомцев и детей.
-"""
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
@@ -10,8 +5,8 @@ from .catalog import CITIES, ORIGINS, MEALS, day_label, dt_label, hours, range_l
 from .models import CartItem, Issue, StateView, TimelineEvent, TripState
 from .tools import get_flight, get_hotel, search_transfers, transfer_offer
 
-AIRPORT_ARRIVAL_MIN = 60  # паспортный контроль + багаж
-AIRPORT_BEFORE_DEP_MIN = 150  # быть в аэропорту за 2,5 часа до международного вылета
+AIRPORT_ARRIVAL_MIN = 60
+AIRPORT_BEFORE_DEP_MIN = 150
 
 
 def current_flight(s: TripState) -> Optional[dict]:

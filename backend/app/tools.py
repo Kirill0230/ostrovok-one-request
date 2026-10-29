@@ -1,11 +1,3 @@
-"""Инструменты агента: подбор направлений, отелей, перелётов, трансферов.
-
-Все функции детерминированные (одинаковый вход -> одинаковый выход) и не зависят от LLM.
-Их можно отдать LLM-агенту как tools (LangChain @tool) почти без изменений: они уже
-возвращают отсортированные варианты с объяснениями «почему / чем пожертвовали / риски».
-
-ДАННЫЕ — СИНТЕТИКА (моки): отели, рейсы и цены сгенерированы, климат — приблизительный.
-"""
 import math
 import random
 from datetime import date, datetime, timedelta
@@ -14,7 +6,6 @@ from typing import Dict, List, Optional, Tuple
 from .catalog import CITIES, MEALS, MEAL_RANK, MONTHS_PREP, ORIGINS, TYPE_LABELS, hours, rub
 from .models import Prefs, Priorities, Travellers
 
-# ---------------------------------------------------------------- общие расчёты
 
 def flight_hours(c: dict, origin: str) -> float:
     o = ORIGINS.get(origin, ORIGINS["moscow"])
@@ -60,17 +51,9 @@ def _norm(values: List[float], v: float, invert: bool = False) -> float:
     return 1 - x if invert else x
 
 
-# ---------------------------------------------------------------- направления
-
 def suggest_destinations(origin: str, d: date, nights: int, t: Travellers, prefs: Prefs,
                          priorities: Priorities, budget: Optional[int], budget_level: Optional[str],
                          exclude: List[str], limit: int = 3) -> Dict:
-    """Подбирает направления из каталога под сезон, бюджет, время перелёта, тип отдыха и состав.
-
-    Возвращает {"options": [...], "funnel": [...], "relaxed": [...]}: сначала варианты, которые
-    проходят все условия, затем — с наименьшим нарушением (оно попадает в tradeoffs и "relaxed").
-    У каждого варианта есть why / tradeoffs / risks.
-    """
     month = d.month
     pool = [c for c in CITIES.values() if c["id"] not in exclude]
     funnel = [f"{len(CITIES)} направлений в каталоге"]
@@ -84,7 +67,6 @@ def suggest_destinations(origin: str, d: date, nights: int, t: Travellers, prefs
 
     est = {c["id"]: estimate_trip(c, origin, d, nights, t) for c in pool}
 
-    # (название, проверка, штраф за нарушение)
     filters: List[Tuple[str, callable, float]] = []
     if prefs.max_flight_hours:
         filters.append((f"перелёт ≤ {hours(prefs.max_flight_hours)}", lambda c: flight_hours(c, origin) <= prefs.max_flight_hours, 2))
@@ -112,7 +94,6 @@ def suggest_destinations(origin: str, d: date, nights: int, t: Travellers, prefs
         funnel.append(f"{n}: {sum(1 for c in pool if f(c))}")
     funnel.append(f"подходят полностью: {len(strict)}")
 
-    # мягкое ранжирование
     fh = [flight_hours(c, origin) for c in pool]
     totals = [est[c["id"]]["total"] for c in pool]
     kids = t.children > 0
@@ -133,7 +114,6 @@ def suggest_destinations(origin: str, d: date, nights: int, t: Travellers, prefs
         score = (2.5 * s_season + 1.2 * s_rain + 2.5 * s_types + w_price * s_price + w_flight * s_flight
                  + (2 if kids else 0) * s_kids)
         scored.append((score, c))
-    # сначала те, что подходят полностью, затем — с наименьшим «штрафом» за нарушенные условия
     scored.sort(key=lambda x: (sum(w for _, w in violations[x[1]["id"]]), -x[0]))
     max_score = max((sc for sc, _ in scored), default=1)
     shown = scored[:limit]
@@ -200,8 +180,6 @@ def suggest_destinations(origin: str, d: date, nights: int, t: Travellers, prefs
     return {"options": options, "funnel": funnel, "relaxed": relaxed}
 
 
-# ---------------------------------------------------------------- отели
-
 _NAME_WORDS = ["Azure", "Coral", "Palm", "Lotus", "Sunset", "Amber", "Jade", "Saffron", "Marina",
                "Orchid", "Silk", "Cedar", "Pearl", "Emerald", "Breeze", "Horizon", "Lumen", "Terra"]
 _BEACH_TPL = [("{} Family Resort & Spa", 5), ("{} Beach Resort", 5), ("{} Bay Hotel", 4), ("{} Garden Hotel", 3),
@@ -214,7 +192,6 @@ _AMENITIES = ["бассейн", "Wi-Fi", "спа", "фитнес", "парков
 
 
 def _hotel_base(city_id: str) -> List[dict]:
-    """Статичные свойства отелей города (генерируются один раз по seed города)."""
     c = CITIES[city_id]
     rng = random.Random(f"hotels-{city_id}")
     beach = "beach" in c["types"]
@@ -276,17 +253,10 @@ def get_hotel(hotel_id: str, check_in: date, nights: int, t: Travellers) -> Opti
 
 def search_hotels(city_id: str, check_in: date, nights: int, t: Travellers, prefs: Prefs,
                   priorities: Priorities, exclude: List[str], limit: int = 4, budget_left: Optional[int] = None) -> Dict:
-    """Ищет отели в направлении на даты, фильтрует по ограничениям и ранжирует по весам.
-
-    budget_left — сколько из общего бюджета остаётся на отель (после перелёта и трансфера).
-
-    Учитывает: цену, питание, бесплатную отмену, расстояние до моря/центра, рейтинг,
-    детский клуб и проживание с питомцами.
-    """
     c = CITIES[city_id]
     offers = [hotel_offer(h, check_in, nights, t) for h in _hotel_base(city_id) if h["id"] not in exclude]
     filters = []
-    if budget_left:  # первым в списке — ослабляется последним
+    if budget_left:
         filters.append((f"в бюджете (≤ {rub(budget_left)} на отель)", lambda h: h["total"] <= budget_left))
     if t.pets:
         filters.append(("можно с питомцем", lambda h: h["pets_allowed"]))
@@ -381,8 +351,6 @@ def search_hotels(city_id: str, check_in: date, nights: int, t: Travellers, pref
     return {"options": options, "funnel": funnel, "relaxed": relaxed}
 
 
-# ---------------------------------------------------------------- перелёты
-
 _SLOTS = [("06:40", 1.0), ("10:15", 1.05), ("14:30", 1.08), ("19:50", 1.0), ("23:55", 0.88)]
 _HUBS = [("Emirates", "Дубай"), ("Turkish Airlines", "Стамбул"), ("Qatar Airways", "Доху"), ("China Eastern", "Шанхай")]
 _DIRECT = ["Аэрофлот", "S7 Airlines", "Уральские авиалинии", "Azur Air", "Победа"]
@@ -449,10 +417,6 @@ def _night(dt_iso: str) -> bool:
 
 def search_flights(origin: str, city_id: str, d: date, nights: int, t: Travellers, prefs: Prefs,
                    priorities: Priorities, exclude: List[str], limit: int = 4) -> Dict:
-    """Ищет перелёты туда-обратно. Обратный рейс — через `nights` ночей после прилёта.
-
-    Учитывает: цену, время в пути, пересадки, ночные вылеты/прилёты, багаж.
-    """
     flights = [_make_flight(origin, city_id, d, nights, s, t) for s in range(len(_SLOTS))]
     flights = [f for f in flights if f["id"] not in exclude]
     filters = []
@@ -520,8 +484,6 @@ def search_flights(origin: str, city_id: str, d: date, nights: int, t: Traveller
     return {"options": options, "funnel": funnel, "relaxed": relaxed}
 
 
-# ---------------------------------------------------------------- трансферы
-
 _TRANSFER_TYPES = {
     "shuttle": {"name": "Групповой шаттл", "emoji": "🚌", "k": 0.35, "speed": 30, "extra_min": 30, "max_pax": 50},
     "taxi": {"name": "Такси (стандарт)", "emoji": "🚕", "k": 1.0, "speed": 45, "extra_min": 5, "max_pax": 3},
@@ -545,12 +507,11 @@ def transfer_offer(kind: str, city_id: str, km: int, arrival_iso: str, t: Travel
 
 
 def search_transfers(city_id: str, hotel: dict, arrival_iso: str, t: Travellers) -> List[dict]:
-    """Варианты трансфера аэропорт ↔ отель (туда и обратно). Первый — рекомендованный."""
     kinds = ["speedboat"] if city_id == "maldives" else ["taxi", "minivan", "shuttle"]
     opts = [transfer_offer(k, city_id, hotel["airport_km"], arrival_iso, t) for k in kinds]
     night = _night(arrival_iso)
     if night:
-        opts = [o for o in opts if o["kind"] != "shuttle"] or opts  # шаттлы ночью не ходят
+        opts = [o for o in opts if o["kind"] != "shuttle"] or opts
 
     def rank(o):
         if t.children or t.pets or t.adults + t.children > 3:

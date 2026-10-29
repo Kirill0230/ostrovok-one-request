@@ -1,4 +1,3 @@
-"""HTTP-защита: редирект на HTTPS, заголовки безопасности, ограничение размера тела запроса."""
 from starlette.datastructures import URL
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -6,7 +5,6 @@ from starlette.responses import JSONResponse, RedirectResponse
 
 from .. import config
 
-# Свой домен для скриптов, стилей, медиа и API; Telegram может встраивать Mini App во фрейм.
 CSP = "; ".join([
     "default-src 'self'",
     "script-src 'self'",
@@ -55,5 +53,5 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if https:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         if request.url.path.startswith("/api/"):
-            response.headers["Cache-Control"] = "no-store"  # ответы API с личными данными не кэшируем
+            response.headers["Cache-Control"] = "no-store"
         return response

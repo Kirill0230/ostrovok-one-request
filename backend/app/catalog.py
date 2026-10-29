@@ -1,4 +1,3 @@
-"""Загрузка каталога направлений и общие справочники/форматтеры."""
 import json
 import os
 from datetime import date, datetime
@@ -15,8 +14,6 @@ ORIGINS: Dict[str, dict] = _raw["origins"]
 
 
 def _load_climate() -> dict:
-    """Климатические нормы Open-Meteo (data/climate.json, backend/scripts/fetch_climate.py).
-    Если файла или города в нём нет — остаются запасные примерные значения из cities.json."""
     path = Path(os.getenv("CLIMATE_PATH", DATA_DIR / "climate.json"))
     if not path.exists():
         return {}
@@ -51,8 +48,21 @@ def city(city_id: Optional[str]) -> Optional[dict]:
     return CITIES.get(city_id) if city_id else None
 
 
-def media_urls(c: dict) -> Dict[str, Optional[str]]:
-    """Ссылки на видео/постер, только если файл реально лежит в data/videos."""
+_credits_cache: Dict[str, object] = {"mtime": None, "data": {}}
+
+
+def video_credits() -> Dict[str, dict]:
+    path = VIDEOS_DIR / "credits.json"
+    try:
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
+        return {}
+    if _credits_cache["mtime"] != mtime:
+        _credits_cache.update(mtime=mtime, data=json.loads(path.read_text(encoding="utf-8")).get("videos", {}))
+    return _credits_cache["data"]
+
+
+def media_urls(c: dict) -> Dict[str, Optional[object]]:
     video = c.get("video")
     video_url = f"/videos/{video}" if video and (VIDEOS_DIR / video).exists() else None
     poster_url = None
@@ -60,7 +70,8 @@ def media_urls(c: dict) -> Dict[str, Optional[str]]:
         if (VIDEOS_DIR / f"{c['id']}.{ext}").exists():
             poster_url = f"/videos/{c['id']}.{ext}"
             break
-    return {"video_url": video_url, "poster_url": poster_url}
+    credit = video_credits().get(c["id"]) if video_url else None
+    return {"video_url": video_url, "poster_url": poster_url, "credit": credit}
 
 
 def rub(n: float) -> str:

@@ -1,11 +1,3 @@
-"""Авторизация.
-
-Пользователь никогда не присылает свой user_id сам: id выдаёт сервер внутри подписанного токена.
-  • Обычный браузер — анонимный пользователь: POST /api/auth/anonymous → случайный id + токен.
-  • Telegram Mini App — POST /api/auth/telegram с initData: подпись проверяется ключом бота,
-    id берётся из подписанных данных Telegram.
-Токен — JWT (HS256) на AUTH_SECRET, передаётся в заголовке Authorization: Bearer <token>.
-"""
 import hashlib
 import hmac
 import json
@@ -27,7 +19,7 @@ ISSUER = "odin-zapros"
 @dataclass(frozen=True)
 class Identity:
     user_id: str
-    kind: str  # anon | telegram
+    kind: str
 
 
 def issue_token(user_id: str, kind: str) -> str:
@@ -51,7 +43,6 @@ def new_anonymous_id() -> str:
 
 
 def current_user(authorization: Optional[str] = Header(default=None)) -> Identity:
-    """Зависимость FastAPI: пользователь из заголовка Authorization."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Нужна авторизация", headers={"WWW-Authenticate": "Bearer"})
     return verify_token(authorization[7:].strip())
@@ -62,12 +53,6 @@ class TelegramAuthError(Exception):
 
 
 def verify_telegram_init_data(init_data: str, bot_token: str, max_age_s: int, now: Optional[float] = None) -> dict:
-    """Проверка initData Telegram Mini App по официальному алгоритму.
-
-    secret = HMAC_SHA256(key="WebAppData", msg=bot_token)
-    hash   = hex(HMAC_SHA256(key=secret, msg="\\n".join(sorted("k=v" без hash))))
-    Возвращает данные пользователя Telegram или бросает TelegramAuthError.
-    """
     if not bot_token:
         raise TelegramAuthError("вход через Telegram не настроен (TELEGRAM_BOT_TOKEN)")
     pairs = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=False))

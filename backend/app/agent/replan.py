@@ -1,4 +1,3 @@
-"""Пересборка плана: после изменения условий пересчитываем только то, что от них зависит."""
 from datetime import datetime
 from typing import Set
 
@@ -33,7 +32,6 @@ def replan(sess: Session, changed: Set[str], ctx: Ctx):
 
 
 def _rebook_flight(s: TripState, ctx: Ctx):
-    """Новые даты или город вылета — берём тот же «слот» рейса (то же время вылета) на новые даты."""
     slot = int(s.flight_id.split("~")[-1])
     old = get_flight(s.flight_id, s.travellers)
     new_id = f"FL~{s.origin}~{s.destination_id}~{s.date_from.isoformat()}~{s.nights}~{slot}"
@@ -84,7 +82,6 @@ def _fix_flight(s: TripState, ctx: Ctx):
 
 
 def _warn_destination(s: TripState, ctx: Ctx):
-    """Направление больше не подходит под новые жёсткие условия — не меняем молча, а спрашиваем."""
     c = CITIES[s.destination_id]
     fh = flight_hours(c, s.origin)
     warn = None
@@ -100,7 +97,6 @@ def _warn_destination(s: TripState, ctx: Ctx):
 
 
 def fit_budget(s: TripState, ctx: Ctx):
-    """Ищет комбинацию отель × перелёт в том же направлении, которая влезает в бюджет с наименьшей потерей качества."""
     view = build_view(s)
     fixed = sum(i.price for i in view.cart if i.kind in ("transfer", "extra"))
     h_cur, f_cur = current_hotel(s), current_flight(s)
@@ -115,7 +111,6 @@ def fit_budget(s: TripState, ctx: Ctx):
             tot = fixed + (ho["hotel"]["total"] if ho else 0) + (fo["flight"]["total"] if fo else 0)
             min_total = tot if min_total is None else min(min_total, tot)
             if tot <= s.budget:
-                # бонус за сохранение уже выбранного — меняем как можно меньше
                 sc = (ho["score"] if ho else 0) + (fo["score"] if fo else 0) \
                     + (15 if ho and h_cur and ho["hotel"]["id"] == h_cur["id"] else 0) \
                     + (15 if fo and f_cur and fo["flight"]["id"] == f_cur["id"] else 0)

@@ -1,0 +1,126 @@
+{
+ "about": "Клипы направлений из Wikimedia Commons под свободными лицензиями. Сгенерировано scripts/fetch_videos.py.",
+ "updated_at": "2026-10-29",
+ "videos": {
+  "antalya": {
+   "author": "Klapi",
+   "license": "CC BY 4.0",
+   "license_url": "https://creativecommons.org/licenses/by/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:2025_Antalya_Turkey.webm",
+   "title": "2025 Antalya Turkey.webm",
+   "note": "фрагмент 2–10 с, без звука"
+  },
+  "bali": {
+   "author": "MartinThoma",
+   "license": "CC0",
+   "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Kelingking_Beach.webm",
+   "title": "Kelingking Beach.webm",
+   "note": "фрагмент 1–9 с, без звука; в кадре: пляж Келингкинг, Нуса-Пенида"
+  },
+  "bangkok": {
+   "author": "Don Ramey Logan",
+   "license": "CC BY 4.0",
+   "license_url": "https://creativecommons.org/licenses/by/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Bangkok_Aerial_Footage_by_Don_Ramey_Logan.webm",
+   "title": "Bangkok Aerial Footage by Don Ramey Logan.webm",
+   "note": "фрагмент 2–10 с, без звука"
+  },
+  "batumi": {
+   "author": "Vitaly Zdanevich",
+   "license": "CC BY 4.0",
+   "license_url": "https://creativecommons.org/licenses/by/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Batumi2025ship-and-sunset.webm",
+   "title": "Batumi2025ship-and-sunset.webm",
+   "note": "фрагмент 2–10 с, без звука"
+  },
+  "dubai": {
+   "author": "Iyhab1994",
+   "license": "CC BY-SA 4.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Dubai_creek.webm",
+   "title": "Dubai creek.webm",
+   "note": "фрагмент 0.5–8 с, без звука; в кадре: залив Дубай-Крик"
+  },
+  "goa": {
+   "author": "Subhashish Panigrahi",
+   "license": "CC BY-SA 3.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Aguada_beach,_Goa.webm",
+   "title": "Aguada beach, Goa.webm",
+   "note": "фрагмент 2–10 с, без звука; в кадре: пляж Агуада"
+  },
+  "istanbul": {
+   "author": "Kurmanbek",
+   "license": "CC BY-SA 4.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:View_of_Haydarpa%C5%9Fa_railway_station_and_the_Bosphorus_from_Kad%C4%B1k%C3%B6y_Pier_20250818.webm",
+   "title": "View of Haydarpaşa railway station and the Bosphorus from Kadıköy Pier 20250818.webm",
+   "note": "фрагмент 1–9 с, без звука; в кадре: Босфор"
+  },
+  "maldives": {
+   "author": "Ashwin Kumar",
+   "license": "CC BY-SA 2.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Stingray_in_Maldives.webm",
+   "title": "Stingray in Maldives.webm",
+   "note": "фрагмент 4–12 с, без звука; в кадре: скат в лагуне"
+  },
+  "pattaya": {
+   "author": "Don Ramey Logan",
+   "license": "CC BY-SA 4.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Pattaya_Jomtien_private_beach_at_Birds_and_Bees_resort_in_Pattaya_Thailand_by_Don_Ramey_Logan.webm",
+   "title": "Pattaya Jomtien private beach at Birds and Bees resort in Pattaya Thailand by Don Ramey Logan.webm",
+   "note": "фрагмент 2–10 с, без звука; в кадре: пляж Джомтьен"
+  },
+  "phuket": {
+   "author": "Deror Avi",
+   "license": "CC BY-SA 3.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:James_Bond_Island_P1120312.ogv",
+   "title": "James Bond Island P1120312.ogv",
+   "note": "фрагмент 1–9 с, без звука; в кадре: залив Пхангнга, экскурсия с Пхукета"
+  },
+  "sanya": {
+   "author": "Kitabc12345",
+   "license": "CC0",
+   "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+   "source_url": "https://commons.wikimedia.org/wiki/File:%E4%B8%89%E4%BA%9E%E7%81%A32020.webm",
+   "title": "三亞灣2020.webm",
+   "note": "фрагмент 1–9 с, без звука; в кадре: залив Санья"
+  },
+  "seoul": {
+   "author": "Nesnad",
+   "license": "CC BY-SA 4.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:View-of-Seoul-from63-Building-2019-7-27.webm",
+   "title": "View-of-Seoul-from63-Building-2019-7-27.webm",
+   "note": "фрагмент 2–10 с, без звука"
+  },
+  "tbilisi": {
+   "author": "Victoria Andrievska from Kyiv, Ukraine",
+   "license": "CC BY 2.0",
+   "license_url": "https://creativecommons.org/licenses/by/2.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Panorama_of_Tbilisi,_Georgia_-_Jan._2016.webm",
+   "title": "Panorama of Tbilisi, Georgia - Jan. 2016.webm",
+   "note": "фрагмент 2–10 с, без звука"
+  },
+  "tokyo": {
+   "author": "Asanagi",
+   "license": "CC0",
+   "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Shibuya_crossing_time-lapse_2019-01-05.webm",
+   "title": "Shibuya crossing time-lapse 2019-01-05.webm",
+   "note": "фрагмент 2–10 с, без звука; в кадре: перекрёсток Сибуя"
+  },
+  "yerevan": {
+   "author": "Ijon",
+   "license": "CC BY-SA 4.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+   "source_url": "https://commons.wikimedia.org/wiki/File:Yerevan_Republic_Square_Musical_Fountains.webm",
+   "title": "Yerevan Republic Square Musical Fountains.webm",
+   "note": "фрагмент 2–10 с, без звука; в кадре: площадь Республики"
+  }
+ }
+}

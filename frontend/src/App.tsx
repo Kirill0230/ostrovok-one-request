@@ -55,7 +55,7 @@ export default function App() {
 
   const started = useRef(false);
   useEffect(() => {
-    if (started.current) return; // StrictMode вызывает эффект дважды — не создаём две сессии
+    if (started.current) return;
     started.current = true;
     telegramReady();
     start();
